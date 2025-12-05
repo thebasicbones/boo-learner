@@ -1910,11 +1910,11 @@ class GraphView {
       .attr('class', 'node-label')
       .attr('text-anchor', 'middle')
       .attr('dy', 35)
-      .attr('fill', '#fff')
-      .attr('font-size', '12px')
-      .attr('font-weight', '500')
+      .attr('fill', '#1a1a1a')
+      .attr('font-size', '13px')
+      .attr('font-weight', '700')
       .attr('pointer-events', 'none')
-      .style('text-shadow', '0 1px 2px rgba(0,0,0,0.5)')
+      .style('text-shadow', '0 2px 4px rgba(255,255,255,0.8), 0 0 1px rgba(255,255,255,1)')
       .style('opacity', 0);
 
     // Update + Enter

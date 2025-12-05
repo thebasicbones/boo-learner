@@ -4,8 +4,8 @@ import logging
 import re
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import (
     ConnectionFailure,
@@ -58,8 +58,9 @@ class MongoDBResourceRepository(BaseResourceRepository):
             return None
 
         # Ensure datetimes are timezone-aware (UTC)
-        created_at = document["created_at"]
-        updated_at = document["updated_at"]
+        # Handle missing timestamps for backward compatibility
+        created_at = document.get("created_at")
+        updated_at = document.get("updated_at")
 
         # MongoDB stores datetimes as UTC but returns them as naive datetime objects
         # We need to make them timezone-aware
@@ -69,7 +70,7 @@ class MongoDBResourceRepository(BaseResourceRepository):
             updated_at = updated_at.replace(tzinfo=UTC)
 
         return {
-            "id": document["_id"],
+            "id": str(document["_id"]),
             "name": document["name"],
             "description": document.get("description"),
             "dependencies": document.get("dependencies", []),
@@ -85,7 +86,7 @@ class MongoDBResourceRepository(BaseResourceRepository):
 
         This method prepares data for MongoDB storage:
         - Maps 'id' to '_id'
-        - Generates UUID for new resources
+        - Generates ObjectId for new resources
         - Ensures UTC timestamps
         - Handles optional fields
 
@@ -98,8 +99,17 @@ class MongoDBResourceRepository(BaseResourceRepository):
         """
         now = datetime.now(UTC)
 
+        # Convert resource_id to ObjectId if provided
+        if resource_id:
+            try:
+                _id = ObjectId(resource_id)
+            except Exception:
+                _id = resource_id
+        else:
+            _id = ObjectId()
+
         document = {
-            "_id": resource_id or str(uuid4()),
+            "_id": _id,
             "name": data.get("name"),
             "description": data.get("description"),
             "dependencies": data.get("dependencies", []),
@@ -152,7 +162,14 @@ class MongoDBResourceRepository(BaseResourceRepository):
             Resource dictionary if found, None otherwise
         """
         try:
-            document = await self.collection.find_one({"_id": resource_id})
+            # Convert string ID to ObjectId for MongoDB query
+            try:
+                object_id = ObjectId(resource_id)
+            except Exception:
+                # If conversion fails, try as string (for backward compatibility)
+                object_id = resource_id
+            
+            document = await self.collection.find_one({"_id": object_id})
             return self._document_to_dict(document) if document else None
         except (ConnectionFailure, ServerSelectionTimeoutError) as e:
             logger.error(f"MongoDB connection error in get_by_id: {e}")
@@ -270,8 +287,14 @@ class MongoDBResourceRepository(BaseResourceRepository):
             # Always update the updated_at timestamp
             update_fields["updated_at"] = datetime.now(UTC)
 
+            # Convert resource_id to ObjectId for query
+            try:
+                object_id = ObjectId(resource_id)
+            except Exception:
+                object_id = resource_id
+            
             # Perform the update
-            result = await self.collection.update_one({"_id": resource_id}, {"$set": update_fields})
+            result = await self.collection.update_one({"_id": object_id}, {"$set": update_fields})
 
             if result.modified_count == 0 and result.matched_count == 0:
                 return None
@@ -341,8 +364,14 @@ class MongoDBResourceRepository(BaseResourceRepository):
                     f"Removed resource {resource_id} from dependency lists of other resources"
                 )
 
+            # Convert resource_id to ObjectId for query
+            try:
+                object_id = ObjectId(resource_id)
+            except Exception:
+                object_id = resource_id
+            
             # Delete the resource itself
-            result = await self.collection.delete_one({"_id": resource_id})
+            result = await self.collection.delete_one({"_id": object_id})
 
             return result.deleted_count > 0
 

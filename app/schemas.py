@@ -47,7 +47,8 @@ class ResourceCreate(ResourceBase):
         None, max_length=500, description="Resource description (optional, max 500 characters)"
     )
     dependencies: list[str] = Field(
-        default_factory=list, description="List of resource IDs this resource depends on"
+        default_factory=list, 
+        description="List of resource IDs or names this resource depends on. Names will be automatically resolved to IDs."
     )
 
     model_config = {
@@ -56,7 +57,12 @@ class ResourceCreate(ResourceBase):
                 {
                     "name": "Frontend Service",
                     "description": "React-based frontend application",
-                    "dependencies": ["backend-api-uuid", "auth-service-uuid"],
+                    "dependencies": ["Backend API", "Auth Service"],
+                },
+                {
+                    "name": "Advanced Python",
+                    "description": "Advanced Python programming course",
+                    "dependencies": ["Introduction to Programming"],
                 }
             ]
         }
@@ -73,7 +79,8 @@ class ResourceUpdate(ResourceBase):
         None, max_length=500, description="Resource description (optional, max 500 characters)"
     )
     dependencies: list[str] | None = Field(
-        None, description="List of resource IDs this resource depends on"
+        None, 
+        description="List of resource IDs or names this resource depends on. Names will be automatically resolved to IDs."
     )
 
     model_config = {
@@ -82,7 +89,7 @@ class ResourceUpdate(ResourceBase):
                 {
                     "name": "Updated Frontend Service",
                     "description": "React-based frontend with new features",
-                    "dependencies": ["backend-api-uuid"],
+                    "dependencies": ["Backend API"],
                 }
             ]
         }

@@ -50,12 +50,22 @@ class ResourceService:
         start_time = time.time()
 
         try:
+            # Resolve dependency names to IDs
+            resolved_dependencies = await self._resolve_dependencies(data.dependencies)
+            
+            # Create a new data object with resolved dependencies
+            resolved_data = ResourceCreate(
+                name=data.name,
+                description=data.description,
+                dependencies=resolved_dependencies
+            )
+            
             # Validate dependencies and check cycles
             temp_id = "temp_new_resource_id"
-            await self._validate_and_check_cycles(temp_id, data.dependencies)
+            await self._validate_and_check_cycles(temp_id, resolved_dependencies)
 
             # Create the resource
-            resource = await self.repository.create(data)
+            resource = await self.repository.create(resolved_data)
 
             # Record successful operation
             duration = time.time() - start_time
@@ -173,12 +183,21 @@ class ResourceService:
             if not existing_resource:
                 raise NotFoundError(resource_id)
 
-            # Validate dependencies if being updated
+            # Resolve dependency names to IDs if being updated
+            resolved_dependencies = None
             if data.dependencies is not None:
-                await self._validate_and_check_cycles(resource_id, data.dependencies)
+                resolved_dependencies = await self._resolve_dependencies(data.dependencies)
+                await self._validate_and_check_cycles(resource_id, resolved_dependencies)
+            
+            # Create a new data object with resolved dependencies
+            resolved_data = ResourceUpdate(
+                name=data.name,
+                description=data.description,
+                dependencies=resolved_dependencies
+            )
 
             # Update the resource
-            updated_resource = await self.repository.update(resource_id, data)
+            updated_resource = await self.repository.update(resource_id, resolved_data)
 
             # Record successful operation
             duration = time.time() - start_time
@@ -394,9 +413,60 @@ class ResourceService:
                 )
             raise
 
+    async def _resolve_dependencies(self, dependencies: list[str]) -> list[str]:
+        """
+        Resolve dependency names or IDs to IDs.
+        
+        Accepts either resource IDs or resource names and returns a list of IDs.
+        If a dependency is already an ID that exists, it's kept as-is.
+        If it's a name, it's resolved to the corresponding ID.
+
+        Args:
+            dependencies: List of resource IDs or names
+
+        Returns:
+            List of resolved resource IDs
+
+        Raises:
+            ValidationError: If any dependency cannot be resolved
+        """
+        if not dependencies:
+            return []
+
+        resolved_ids = []
+        all_resources = await self.repository.get_all()
+        
+        # Create lookup maps for both ID and name
+        id_map = {self._get_resource_id(r): r for r in all_resources}
+        name_map = {self._get_resource_name(r): self._get_resource_id(r) for r in all_resources}
+
+        for dep in dependencies:
+            dep_stripped = dep.strip()
+            
+            # Check if it's already a valid ID
+            if dep_stripped in id_map:
+                resolved_ids.append(dep_stripped)
+            # Check if it's a resource name
+            elif dep_stripped in name_map:
+                resolved_ids.append(name_map[dep_stripped])
+            else:
+                # Not found as either ID or name
+                raise ValidationError(
+                    "Invalid dependency: resource not found",
+                    {
+                        "dependency": dep_stripped,
+                        "message": f"No resource found with ID or name '{dep_stripped}'"
+                    }
+                )
+
+        return resolved_ids
+
     async def _validate_dependencies_exist(self, dependency_ids: list[str]) -> None:
         """
         Validate that all dependency IDs exist in the database.
+        
+        Note: This method expects IDs that have already been resolved.
+        Use _resolve_dependencies() first to convert names to IDs.
 
         Args:
             dependency_ids: List of resource IDs to validate
@@ -412,7 +482,11 @@ class ResourceService:
             resource = await self.repository.get_by_id(dep_id)
             if not resource:
                 raise ValidationError(
-                    "Invalid dependency: resource not found", {"dependency_id": dep_id}
+                    "Invalid dependency: resource ID not found",
+                    {
+                        "dependency_id": dep_id,
+                        "message": f"Resource with ID '{dep_id}' does not exist"
+                    }
                 )
 
     async def _validate_and_check_cycles(self, resource_id: str, dependencies: list[str]) -> None:
