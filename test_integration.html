@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Integration Test - boo-learner</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        .test-item {
+            padding: 10px;
+            margin: 5px 0;
+            border-left: 4px solid #ddd;
+            background: #f9f9f9;
+        }
+        .test-item.pass {
+            border-left-color: #10b981;
+            background: #f0fdf4;
+        }
+        .test-item.fail {
+            border-left-color: #ef4444;
+            background: #fef2f2;
+        }
+        .test-item.pending {
+            border-left-color: #f59e0b;
+            background: #fffbeb;
+        }
+        .status {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .status.pass { color: #10b981; }
+        .status.fail { color: #ef4444; }
+        .status.pending { color: #f59e0b; }
+        button {
+            background: #6366f1;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #4f46e5;
+        }
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .summary {
+            font-size: 18px;
+            font-weight: bold;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .summary.pass {
+            background: #10b981;
+            color: white;
+        }
+        .summary.fail {
+            background: #ef4444;
+            color: white;
+        }
+        #test-log {
+            background: #1f2937;
+            color: #f3f4f6;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 boo-learner Integration Test Suite</h1>
+    
+    <div class="test-section">
+        <h2>Test Controls</h2>
+        <button onclick="runAllTests()">Run All Tests</button>
+        <button onclick="clearResults()">Clear Results</button>
+        <button onclick="window.location.href='/static/index.html'">Open Application</button>
+    </div>
+
+    <div id="summary"></div>
+
+    <div class="test-section">
+        <h2>Test Results</h2>
+        <div id="test-results"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Log</h2>
+        <div id="test-log"></div>
+    </div>
+
+    <script>
+        const results = [];
+        let testLog = [];
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logMessage = `[${timestamp}] ${message}`;
+            testLog.push(logMessage);
+            document.getElementById('test-log').textContent = testLog.join('\n');
+            console.log(message);
+        }
+
+        function addResult(name, status, message = '') {
+            results.push({ name, status, message });
+            updateResults();
+        }
+
+        function updateResults() {
+            const container = document.getElementById('test-results');
+            container.innerHTML = results.map(r => `
+                <div class="test-item ${r.status}">
+                    <span class="status ${r.status}">${r.status === 'pass' ? '✓' : r.status === 'fail' ? '✗' : '⏳'}</span>
+                    <strong>${r.name}</strong>
+                    ${r.message ? `<br><small>${r.message}</small>` : ''}
+                </div>
+            `).join('');
+
+            // Update summary
+            const passed = results.filter(r => r.status === 'pass').length;
+            const failed = results.filter(r => r.status === 'fail').length;
+            const total = results.length;
+            
+            const summaryDiv = document.getElementById('summary');
+            if (total > 0) {
+                const allPassed = failed === 0;
+                summaryDiv.className = `summary ${allPassed ? 'pass' : 'fail'}`;
+                summaryDiv.textContent = `${passed}/${total} tests passed ${allPassed ? '✓' : '✗'}`;
+            }
+        }
+
+        function clearResults() {
+            results.length = 0;
+            testLog.length = 0;
+            updateResults();
+            document.getElementById('test-log').textContent = '';
+        }
+
+        async function runAllTests() {
+            clearResults();
+            log('Starting integration tests...');
+
+            // Test 1: Check if application files exist
+            await testFileExists();
+
+            // Test 2: Check if D3.js loads
+            await testD3Loading();
+
+            // Test 3: Check if application initializes
+            await testAppInitialization();
+
+            // Test 4: Check API endpoints
+            await testAPIEndpoints();
+
+            // Test 5: Check state management
+            await testStateManagement();
+
+            // Test 6: Check local storage
+            await testLocalStorage();
+
+            log('All tests completed!');
+        }
+
+        async function testFileExists() {
+            log('Testing file existence...');
+            
+            try {
+                const response = await fetch('/static/app.js');
+                if (response.ok) {
+                    addResult('Application JavaScript file exists', 'pass');
+                    log('✓ app.js found');
+                } else {
+                    addResult('Application JavaScript file exists', 'fail', `Status: ${response.status}`);
+                    log('✗ app.js not found');
+                }
+            } catch (error) {
+                addResult('Application JavaScript file exists', 'fail', error.message);
+                log(`✗ Error checking app.js: ${error.message}`);
+            }
+
+            try {
+                const response = await fetch('/static/styles.css');
+                if (response.ok) {
+                    addResult('Application CSS file exists', 'pass');
+                    log('✓ styles.css found');
+                } else {
+                    addResult('Application CSS file exists', 'fail', `Status: ${response.status}`);
+                    log('✗ styles.css not found');
+                }
+            } catch (error) {
+                addResult('Application CSS file exists', 'fail', error.message);
+                log(`✗ Error checking styles.css: ${error.message}`);
+            }
+
+            try {
+                const response = await fetch('/static/index.html');
+                if (response.ok) {
+                    addResult('Application HTML file exists', 'pass');
+                    log('✓ index.html found');
+                } else {
+                    addResult('Application HTML file exists', 'fail', `Status: ${response.status}`);
+                    log('✗ index.html not found');
+                }
+            } catch (error) {
+                addResult('Application HTML file exists', 'fail', error.message);
+                log(`✗ Error checking index.html: ${error.message}`);
+            }
+        }
+
+        async function testD3Loading() {
+            log('Testing D3.js loading...');
+            
+            try {
+                const response = await fetch('https://d3js.org/d3.v7.min.js');
+                if (response.ok) {
+                    addResult('D3.js CDN accessible', 'pass');
+                    log('✓ D3.js CDN is accessible');
+                } else {
+                    addResult('D3.js CDN accessible', 'fail', `Status: ${response.status}`);
+                    log('✗ D3.js CDN not accessible');
+                }
+            } catch (error) {
+                addResult('D3.js CDN accessible', 'fail', error.message);
+                log(`✗ Error accessing D3.js CDN: ${error.message}`);
+            }
+        }
+
+        async function testAppInitialization() {
+            log('Testing application initialization...');
+            
+            // This test would require loading the app in an iframe
+            // For now, we'll just check if the HTML structure is correct
+            try {
+                const response = await fetch('/static/index.html');
+                const html = await response.text();
+                
+                const hasAppContainer = html.includes('id="app"');
+                const hasGraphView = html.includes('id="graph-view"');
+                const hasTimelineView = html.includes('id="timeline-view"');
+                const hasListView = html.includes('id="list-view"');
+                const hasModal = html.includes('id="course-modal"');
+                
+                if (hasAppContainer && hasGraphView && hasTimelineView && hasListView && hasModal) {
+                    addResult('HTML structure is correct', 'pass');
+                    log('✓ All required HTML elements present');
+                } else {
+                    const missing = [];
+                    if (!hasAppContainer) missing.push('app container');
+                    if (!hasGraphView) missing.push('graph view');
+                    if (!hasTimelineView) missing.push('timeline view');
+                    if (!hasListView) missing.push('list view');
+                    if (!hasModal) missing.push('course modal');
+                    
+                    addResult('HTML structure is correct', 'fail', `Missing: ${missing.join(', ')}`);
+                    log(`✗ Missing HTML elements: ${missing.join(', ')}`);
+                }
+            } catch (error) {
+                addResult('HTML structure is correct', 'fail', error.message);
+                log(`✗ Error checking HTML structure: ${error.message}`);
+            }
+        }
+
+        async function testAPIEndpoints() {
+            log('Testing API endpoints...');
+            
+            // Test GET /api/v1/resources
+            try {
+                const response = await fetch('/api/v1/resources');
+                if (response.ok) {
+                    const data = await response.json();
+                    addResult('GET /api/v1/resources works', 'pass', `Returned ${data.length} courses`);
+                    log(`✓ GET /resources returned ${data.length} courses`);
+                } else {
+                    addResult('GET /api/v1/resources works', 'fail', `Status: ${response.status}`);
+                    log(`✗ GET /resources failed with status ${response.status}`);
+                }
+            } catch (error) {
+                addResult('GET /api/v1/resources works', 'fail', error.message);
+                log(`✗ Error testing GET /resources: ${error.message}`);
+            }
+
+            // Test GET /api/v1/search (topological sort)
+            try {
+                const response = await fetch('/api/v1/search');
+                if (response.ok) {
+                    const data = await response.json();
+                    addResult('GET /api/v1/search works', 'pass', `Returned ${data.length} sorted courses`);
+                    log(`✓ GET /search returned ${data.length} sorted courses`);
+                } else if (response.status === 409) {
+                    addResult('GET /api/v1/search works', 'pass', 'Circular dependency detected (expected)');
+                    log('✓ GET /search detected circular dependency (expected behavior)');
+                } else {
+                    addResult('GET /api/v1/search works', 'fail', `Status: ${response.status}`);
+                    log(`✗ GET /search failed with status ${response.status}`);
+                }
+            } catch (error) {
+                addResult('GET /api/v1/search works', 'fail', error.message);
+                log(`✗ Error testing GET /search: ${error.message}`);
+            }
+        }
+
+        async function testStateManagement() {
+            log('Testing state management...');
+            
+            // Test if StateManager class is defined in app.js
+            try {
+                const response = await fetch('/static/app.js');
+                const code = await response.text();
+                
+                const hasStateManager = code.includes('class StateManager');
+                const hasSubscribe = code.includes('subscribe(callback)');
+                const hasSetState = code.includes('setState(updates)');
+                const hasNotify = code.includes('notify()');
+                
+                if (hasStateManager && hasSubscribe && hasSetState && hasNotify) {
+                    addResult('StateManager class is defined', 'pass');
+                    log('✓ StateManager class found with all required methods');
+                } else {
+                    const missing = [];
+                    if (!hasStateManager) missing.push('StateManager class');
+                    if (!hasSubscribe) missing.push('subscribe method');
+                    if (!hasSetState) missing.push('setState method');
+                    if (!hasNotify) missing.push('notify method');
+                    
+                    addResult('StateManager class is defined', 'fail', `Missing: ${missing.join(', ')}`);
+                    log(`✗ StateManager incomplete: ${missing.join(', ')}`);
+                }
+            } catch (error) {
+                addResult('StateManager class is defined', 'fail', error.message);
+                log(`✗ Error checking StateManager: ${error.message}`);
+            }
+        }
+
+        async function testLocalStorage() {
+            log('Testing local storage...');
+            
+            try {
+                // Test if localStorage is available
+                const testKey = 'boo-learner:test';
+                const testValue = { test: true };
+                
+                localStorage.setItem(testKey, JSON.stringify(testValue));
+                const retrieved = JSON.parse(localStorage.getItem(testKey));
+                localStorage.removeItem(testKey);
+                
+                if (retrieved && retrieved.test === true) {
+                    addResult('Local storage is functional', 'pass');
+                    log('✓ Local storage read/write works');
+                } else {
+                    addResult('Local storage is functional', 'fail', 'Data mismatch');
+                    log('✗ Local storage data mismatch');
+                }
+            } catch (error) {
+                addResult('Local storage is functional', 'fail', error.message);
+                log(`✗ Error testing local storage: ${error.message}`);
+            }
+        }
+
+        // Auto-run tests on page load
+        window.addEventListener('load', () => {
+            log('Integration test page loaded');
+            log('Click "Run All Tests" to start testing');
+        });
+    </script>
+</body>
+</html>

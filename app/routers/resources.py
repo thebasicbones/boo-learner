@@ -2,13 +2,12 @@
 
 from fastapi import APIRouter, Depends, Query, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database_factory import get_db
 from app.schemas import ErrorResponse, ResourceCreate, ResourceResponse, ResourceUpdate
 from app.services.resource_service import ResourceService
 
-router = APIRouter(prefix="/api", tags=["resources"])
+router = APIRouter(prefix="/api/v1", tags=["resources"])
 
 
 @router.post(
@@ -22,7 +21,7 @@ router = APIRouter(prefix="/api", tags=["resources"])
     },
 )
 async def create_resource(
-    data: ResourceCreate, db: AsyncSession | AsyncIOMotorDatabase = Depends(get_db)
+    data: ResourceCreate, db: AsyncIOMotorDatabase = Depends(get_db)
 ) -> ResourceResponse:
     """
     Create a new resource.
@@ -67,7 +66,7 @@ async def create_resource(
     },
 )
 async def list_resources(
-    db: AsyncSession | AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> list[ResourceResponse]:
     """
     Get all resources.
@@ -90,7 +89,7 @@ async def list_resources(
     },
 )
 async def get_resource(
-    resource_id: str, db: AsyncSession | AsyncIOMotorDatabase = Depends(get_db)
+    resource_id: str, db: AsyncIOMotorDatabase = Depends(get_db)
 ) -> ResourceResponse:
     """
     Get a single resource by ID.
@@ -118,7 +117,7 @@ async def get_resource(
 async def update_resource(
     resource_id: str,
     data: ResourceUpdate,
-    db: AsyncSession | AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> ResourceResponse:
     """
     Update an existing resource.
@@ -147,7 +146,7 @@ async def update_resource(
 async def delete_resource(
     resource_id: str,
     cascade: bool = Query(False, description="Delete all downstream dependencies"),
-    db: AsyncSession | AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> None:
     """
     Delete a resource.
@@ -174,7 +173,7 @@ async def delete_resource(
 )
 async def search_resources(
     q: str | None = Query(None, description="Search query for name or description"),
-    db: AsyncSession | AsyncIOMotorDatabase = Depends(get_db),
+    db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> list[ResourceResponse]:
     """
     Search for resources and return them in topological order.

@@ -258,15 +258,15 @@
   - Use appropriate easing functions
   - _Requirements: 2.5_
 
-- [-] 8. Build timeline view with topological sorting
-- [-] 8.1 Create TimelineView component structure
+- [x] 8. Build timeline view with topological sorting
+- [x] 8.1 Create TimelineView component structure
   - Set up timeline container with horizontal/vertical layouts
   - Create level containers for grouping courses
   - Add responsive layout switching for mobile
   - Style with modern card design
   - _Requirements: 3.1, 3.2, 5.5_
 
-- [ ] 8.2 Implement topological sort visualization
+- [x] 8.2 Implement topological sort visualization
   - Fetch sorted courses from backend API
   - Group courses into levels based on dependencies
   - Display courses in correct order (dependencies first)
@@ -281,14 +281,14 @@
   - **Property 7: Level grouping independence**
   - **Validates: Requirements 3.2**
 
-- [ ] 8.5 Add timeline course cards with interactions
+- [x] 8.5 Add timeline course cards with interactions
   - Display course information in timeline cards
   - Show completion status and availability
   - Add hover effects with highlighting
   - Implement click to view details
   - _Requirements: 3.3, 7.2_
 
-- [ ] 8.6 Implement cross-view highlight synchronization
+- [x] 8.6 Implement cross-view highlight synchronization
   - Sync hover highlights between timeline and graph
   - Update both views when course is hovered
   - Maintain highlight state across view switches
@@ -298,7 +298,7 @@
   - **Property 8: Cross-view highlight synchronization**
   - **Validates: Requirements 3.3**
 
-- [ ] 8.8 Add circular dependency error visualization
+- [x] 8.8 Add circular dependency error visualization
   - Detect circular dependencies from API errors
   - Highlight cycle nodes with pulsing animation
   - Display error message with affected courses
@@ -310,7 +310,7 @@
   - Test affected nodes are highlighted
   - _Requirements: 3.4_
 
-- [ ] 8.10 Create empty state for timeline view
+- [x] 8.10 Create empty state for timeline view
   - Display engaging empty state when no courses
   - Show suggestions to add first course
   - Include call-to-action button
@@ -322,14 +322,14 @@
   - _Requirements: 3.5_
 
 - [ ] 9. Implement view switching and synchronization
-- [ ] 9.1 Create view mode controls and navigation
+- [x] 9.1 Create view mode controls and navigation
   - Add view switcher buttons (graph, timeline, list)
   - Implement keyboard shortcuts for view switching (1, 2, 3)
   - Show active view indicator
   - Persist view mode preference to local storage
   - _Requirements: 10.1_
 
-- [ ] 9.2 Implement view synchronization logic
+- [x] 9.2 Implement view synchronization logic
   - Ensure all views display same filtered/searched courses
   - Update all views when data changes
   - Maintain selection across view switches
@@ -352,10 +352,10 @@
   - Make modals full-screen on mobile
   - _Requirements: 5.1, 5.5_ -->
 
-- [ ]* 10.2 Write unit test for mobile layout switching
+<!-- - [ ]* 10.2 Write unit test for mobile layout switching
   - Test layout changes at 768px breakpoint
   - Test stacked views on mobile
-  - _Requirements: 5.1_
+  - _Requirements: 5.1_ -->
 
 <!-- - [ ] 10.3 Add touch-friendly controls for mobile
   - Increase tap target sizes to 44x44 pixels minimum
@@ -363,16 +363,16 @@
   - Implement swipe gestures for navigation
   - _Requirements: 5.2_ -->
 
-- [ ]* 10.4 Write property test for mobile tap target sizing
+<!-- - [ ]* 10.4 Write property test for mobile tap target sizing
   - **Property 9: Mobile tap target sizing**
-  - **Validates: Requirements 5.2**
+  - **Validates: Requirements 5.2** -->
 
 <!-- - [ ] 10.5 Implement pinch-to-zoom and pan for mobile graph
   - Add touch event handlers for pinch gestures
   - Implement two-finger pan for graph navigation
   - Add momentum scrolling for smooth feel
   - _Requirements: 5.3_ -->
-
+<!-- 
 - [ ]* 10.6 Write unit test for touch gesture support
   - Test pinch-to-zoom works on graph
   - Test pan gestures move graph
@@ -386,7 +386,7 @@
 
 - [ ]* 10.8 Write property test for state preservation
   - **Property 10: State preservation across layouts**
-  - **Validates: Requirements 5.4**
+  - **Validates: Requirements 5.4** -->
 
 <!-- - [ ] 11. Implement keyboard navigation and accessibility -->
 <!-- - [ ] 11.1 Add keyboard navigation for interactive elements
@@ -408,11 +408,11 @@
   - Add shortcuts for view switching (1, 2, 3)
   - _Requirements: 9.2_ -->
 
-- [ ]* 11.4 Write unit test for keyboard shortcuts
+<!-- - [ ]* 11.4 Write unit test for keyboard shortcuts
   - Test Enter opens course details
   - Test Escape closes modals
   - Test view switching shortcuts work
-  - _Requirements: 9.2_
+  - _Requirements: 9.2_ -->
 
 <!-- - [ ] 11.5 Add comprehensive ARIA labels and roles
   - Add aria-label to all buttons and interactive elements
@@ -420,10 +420,10 @@
   - Add aria-live regions for dynamic content
   - Implement aria-describedby for form fields
   - _Requirements: 9.3_ -->
-
+<!-- 
 - [ ]* 11.6 Write property test for ARIA label completeness
   - **Property 25: ARIA label completeness**
-  - **Validates: Requirements 9.3**
+  - **Validates: Requirements 9.3** -->
 
 <!-- - [ ] 11.7 Create keyboard shortcuts help overlay
   - Build modal showing all available shortcuts
@@ -431,11 +431,11 @@
   - Group shortcuts by category
   - Style with modern design
   - _Requirements: 9.5_ -->
-
+<!-- 
 - [ ]* 11.8 Write unit test for help overlay
   - Test overlay opens with ? key
   - Test all shortcuts are listed
-  - _Requirements: 9.5_
+  - _Requirements: 9.5_ -->
 
 - [ ] 12. Add animations and visual polish
 - [ ] 12.1 Implement micro-animations for interactions
@@ -480,13 +480,13 @@
   - Memoize expensive calculations
   - _Requirements: 2.1, 3.1_ -->
 
-- [ ]* 13.3 Write performance tests
+<!-- - [ ]* 13.3 Write performance tests
   - Test graph renders in < 500ms for 50 nodes
   - Test search responds in < 100ms
-  - Test view switches in < 200ms
+  - Test view switches in < 200ms -->
 
-- [ ] 14. Final integration and testing
-- [ ] 14.1 Integrate all components into main application
+- [-] 14. Final integration and testing
+- [x] 14.1 Integrate all components into main application
   - Wire up all event handlers and state updates
   - Connect all views to StateManager
   - Ensure proper error handling throughout
@@ -507,7 +507,7 @@
   - Fix any accessibility issues found
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_ -->
 
-- [ ]* 14.4 Write comprehensive integration tests
+- [ ] 14.4 Write comprehensive integration tests
   - Test complete user workflows
   - Test error scenarios and recovery
   - Test offline functionality

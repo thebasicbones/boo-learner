@@ -1,70 +1,49 @@
 """Integration tests for API endpoints
 
-These tests use parameterized fixtures to run against both SQLite and MongoDB,
-ensuring the API layer works correctly with both backends.
+These tests use MongoDB backend for testing the API layer.
 """
 
 import os
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.database_factory import get_db
-from app.database_sqlalchemy import AsyncSessionLocal, drop_sqlalchemy_db, init_sqlalchemy_db
 from main import app
 
 
-@pytest.fixture(params=["sqlite", "mongodb"])
-async def client(request, mongodb_available):
-    """Create a test client with database dependency override for both backends"""
-    backend = request.param
+@pytest_asyncio.fixture
+async def client(mongodb_available):
+    """Create a test client with database dependency override for MongoDB"""
+    if not mongodb_available:
+        pytest.skip("MongoDB is not available for testing")
 
-    if backend == "sqlite":
-        # Setup SQLite
-        await drop_sqlalchemy_db()
-        await init_sqlalchemy_db()
+    # Setup MongoDB
+    mongodb_url = os.getenv("DATABASE_URL", "mongodb://localhost:27017")
+    test_db_name = f"fastapi_crud_test_api_{os.getpid()}"
 
-        async def override_get_db():
-            async with AsyncSessionLocal() as session:
-                yield session
+    client_instance = AsyncIOMotorClient(mongodb_url)
+    db = client_instance[test_db_name]
 
-        app.dependency_overrides[get_db] = override_get_db
+    # Create indexes
+    await db.resources.create_index("name")
+    await db.resources.create_index("dependencies")
 
-        async with AsyncClient(app=app, base_url="http://test") as ac:
-            yield ac
+    async def override_get_db():
+        return db
 
-        app.dependency_overrides.clear()
-        await drop_sqlalchemy_db()
+    app.dependency_overrides[get_db] = override_get_db
 
-    elif backend == "mongodb":
-        if not mongodb_available:
-            pytest.skip("MongoDB is not available for testing")
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
 
-        # Setup MongoDB
-        mongodb_url = os.getenv("DATABASE_URL", "mongodb://localhost:27017")
-        test_db_name = f"fastapi_crud_test_api_{os.getpid()}"
+    app.dependency_overrides.clear()
 
-        client_instance = AsyncIOMotorClient(mongodb_url)
-        db = client_instance[test_db_name]
-
-        # Create indexes
-        await db.resources.create_index("name")
-        await db.resources.create_index("dependencies")
-
-        async def override_get_db():
-            yield db
-
-        app.dependency_overrides[get_db] = override_get_db
-
-        async with AsyncClient(app=app, base_url="http://test") as ac:
-            yield ac
-
-        app.dependency_overrides.clear()
-
-        # Cleanup
-        await client_instance.drop_database(test_db_name)
-        client_instance.close()
+    # Cleanup
+    await client_instance.drop_database(test_db_name)
+    client_instance.close()
 
 
 @pytest.mark.asyncio

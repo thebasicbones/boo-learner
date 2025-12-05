@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.database_factory import init_database, close_database
 from app.routers import resources
@@ -46,17 +48,16 @@ app.add_middleware(
 register_error_handlers(app)
 
 # Include routers
-app.include_router(resources.router, prefix="/resources", tags=["resources"])
+app.include_router(resources.router)
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
-    return {
-        "message": "Welcome to boo-learner",
-        "docs": "/docs",
-        "redoc": "/redoc"
-    }
+    """Serve the frontend application."""
+    return FileResponse("static/index.html")
 
 
 @app.get("/health")

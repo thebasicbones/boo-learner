@@ -315,7 +315,8 @@ class APIClient {
    * @returns {Promise<Array>} Sorted array of courses
    */
   async getTopologicalSort() {
-    return this.request('/resources/sorted');
+    // Use the search endpoint with no query to get all resources in topological order
+    return this.request('/search');
   }
 }
 
@@ -1363,6 +1364,19 @@ class GraphView {
       console.error('Graph container not found');
       return;
     }
+    
+    // Check if D3 is loaded
+    if (typeof d3 === 'undefined') {
+      console.error('D3.js library not loaded');
+      this.graphContainer.innerHTML = `
+        <div class="graph-error">
+          <div class="error-icon">⚠️</div>
+          <h3>Graph Visualization Unavailable</h3>
+          <p>The D3.js library failed to load. Please check your internet connection and refresh the page.</p>
+        </div>
+      `;
+      return;
+    }
 
     // Clear any existing SVG
     this.graphContainer.innerHTML = '';
@@ -1552,8 +1566,11 @@ class GraphView {
       return;
     }
 
-    // Show empty state if no courses
-    if (!courses || courses.length === 0) {
+    // Apply filters and search to ensure synchronization with other views
+    const filteredCourses = this.filterCourses(courses);
+
+    // Show empty state if no courses after filtering
+    if (!filteredCourses || filteredCourses.length === 0) {
       this.emptyState.classList.remove('hidden');
       if (this.svg) {
         this.svg.style('display', 'none');
@@ -1568,10 +1585,50 @@ class GraphView {
     }
 
     // Prepare data
-    this.prepareData(courses);
+    this.prepareData(filteredCourses);
 
     // Render the graph
     this.render();
+  }
+
+  /**
+   * Filter courses based on search query and filters
+   * This ensures the graph view displays the same filtered courses as other views
+   * @param {Array} courses - Array of courses
+   * @returns {Array} Filtered courses
+   */
+  filterCourses(courses) {
+    let filtered = [...courses];
+
+    // Apply search filter
+    const searchQuery = this.stateManager.state.searchQuery.toLowerCase().trim();
+    if (searchQuery) {
+      filtered = filtered.filter(course => {
+        const nameMatch = course.name.toLowerCase().includes(searchQuery);
+        const descMatch = course.description && course.description.toLowerCase().includes(searchQuery);
+        return nameMatch || descMatch;
+      });
+    }
+
+    // Apply status filter
+    const statusFilter = this.stateManager.state.filters.status;
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(course => {
+        const isCompleted = this.stateManager.isCompleted(course.id);
+        const isAvailable = this.stateManager.isAvailable(course);
+
+        if (statusFilter === 'completed') {
+          return isCompleted;
+        } else if (statusFilter === 'available') {
+          return !isCompleted && isAvailable;
+        } else if (statusFilter === 'locked') {
+          return !isCompleted && !isAvailable;
+        }
+        return true;
+      });
+    }
+
+    return filtered;
   }
 
   /**
@@ -1975,6 +2032,11 @@ class GraphView {
   handleNodeHover(event, d, isEntering) {
     const node = d3.select(event.currentTarget);
     
+    // Trigger cross-view synchronization with timeline view
+    if (timelineView && typeof timelineView.highlightCourseExternal === 'function') {
+      timelineView.highlightCourseExternal(d.id, isEntering);
+    }
+    
     if (isEntering) {
       // Enlarge the hovered node
       node.select('circle:first-child')
@@ -2155,6 +2217,115 @@ class GraphView {
       .duration(750)
       .ease(d3.easeCubicInOut)
       .call(this.zoom.transform, transform);
+  }
+
+  /**
+   * Highlight a node externally (for cross-view synchronization)
+   * @param {string} courseId - Course ID to highlight
+   * @param {boolean} highlight - Whether to highlight or unhighlight
+   */
+  highlightNodeExternal(courseId, highlight) {
+    if (!this.nodeElements) return;
+
+    // Find the node with this course ID
+    const node = this.nodes.find(n => n.id === courseId);
+    if (!node) return;
+
+    // Find the D3 selection for this node
+    const nodeSelection = this.nodeElements.filter(d => d.id === courseId);
+    
+    if (highlight) {
+      // Enlarge the node
+      nodeSelection.select('circle:first-child')
+        .transition()
+        .duration(150)
+        .attr('r', 24)
+        .attr('stroke-width', 3)
+        .attr('stroke', '#ec4899'); // Pink highlight for cross-view
+
+      // Find related nodes
+      const dependencies = new Set();
+      const dependents = new Set();
+
+      this.links.forEach(link => {
+        const targetId = link.target.id || link.target;
+        const sourceId = link.source.id || link.source;
+        
+        if (targetId === courseId) {
+          dependencies.add(sourceId);
+        }
+        if (sourceId === courseId) {
+          dependents.add(targetId);
+        }
+      });
+
+      // Dim unrelated nodes
+      this.nodeElements
+        .transition()
+        .duration(150)
+        .style('opacity', n => {
+          if (n.id === courseId) return 1;
+          if (dependencies.has(n.id) || dependents.has(n.id)) return 1;
+          return 0.3;
+        });
+
+      // Highlight related edges
+      if (this.linkElements) {
+        this.linkElements
+          .transition()
+          .duration(150)
+          .style('opacity', link => {
+            const targetId = link.target.id || link.target;
+            const sourceId = link.source.id || link.source;
+            return (targetId === courseId || sourceId === courseId) ? 1 : 0.1;
+          })
+          .attr('stroke', link => {
+            const targetId = link.target.id || link.target;
+            const sourceId = link.source.id || link.source;
+            if (targetId === courseId) return '#ec4899';
+            if (sourceId === courseId) return '#8b5cf6';
+            return '#cbd5e1';
+          });
+      }
+    } else {
+      // Reset node
+      nodeSelection.select('circle:first-child')
+        .transition()
+        .duration(150)
+        .attr('r', 20)
+        .attr('stroke-width', 2)
+        .attr('stroke', n => {
+          if (n.completed) return '#4f46e5';
+          if (n.available) return '#059669';
+          return '#6b7280';
+        });
+
+      // Reset all nodes opacity
+      this.nodeElements
+        .transition()
+        .duration(150)
+        .style('opacity', 1);
+
+      // Reset all links
+      if (this.linkElements) {
+        this.linkElements
+          .transition()
+          .duration(150)
+          .style('opacity', 1)
+          .attr('stroke', link => {
+            const sourceNode = this.nodes.find(n => n.id === (link.source.id || link.source));
+            const targetNode = this.nodes.find(n => n.id === (link.target.id || link.target));
+            
+            if (sourceNode?.completed && targetNode?.completed) {
+              return '#a5b4fc';
+            }
+            if (sourceNode?.completed && targetNode?.available) {
+              return '#6ee7b7';
+            }
+            return '#cbd5e1';
+          });
+      }
+    }
   }
 }
 
@@ -2404,6 +2575,472 @@ class ListView {
 }
 
 // ============================================
+// TimelineView - Timeline View Component
+// ============================================
+
+class TimelineView {
+  constructor(container, stateManager) {
+    this.container = container;
+    this.stateManager = stateManager;
+    this.timelineContainer = document.getElementById('timeline-container');
+    this.emptyState = document.getElementById('timeline-empty');
+    this.sortedCourses = [];
+    this.levels = [];
+  }
+
+  /**
+   * Update the timeline view with courses
+   * @param {Array} courses - Array of courses to display
+   */
+  async update(courses) {
+    if (!this.timelineContainer || !this.emptyState) {
+      console.error('Timeline view elements not found');
+      return;
+    }
+
+    // Apply filters and search
+    const filteredCourses = this.filterCourses(courses);
+
+    // Show empty state if no courses
+    if (filteredCourses.length === 0) {
+      this.timelineContainer.innerHTML = '';
+      this.emptyState.classList.remove('hidden');
+      return;
+    }
+
+    // Hide empty state
+    this.emptyState.classList.add('hidden');
+
+    try {
+      // Fetch topologically sorted courses from backend
+      await this.fetchSortedCourses();
+      
+      // Group courses into levels
+      this.groupIntoLevels();
+      
+      // Render the timeline
+      this.render();
+    } catch (error) {
+      console.error('Error updating timeline view:', error);
+      
+      // Show error in timeline
+      this.timelineContainer.innerHTML = `
+        <div class="timeline-error">
+          <div class="empty-icon">⚠️</div>
+          <h3>Unable to Load Timeline</h3>
+          <p>${error.message || 'An error occurred while loading the timeline.'}</p>
+        </div>
+      `;
+    }
+  }
+
+  /**
+   * Filter courses based on search query and filters
+   * @param {Array} courses - Array of courses
+   * @returns {Array} Filtered courses
+   */
+  filterCourses(courses) {
+    let filtered = [...courses];
+
+    // Apply search filter
+    const searchQuery = this.stateManager.state.searchQuery.toLowerCase().trim();
+    if (searchQuery) {
+      filtered = filtered.filter(course => {
+        const nameMatch = course.name.toLowerCase().includes(searchQuery);
+        const descMatch = course.description && course.description.toLowerCase().includes(searchQuery);
+        return nameMatch || descMatch;
+      });
+    }
+
+    // Apply status filter
+    const statusFilter = this.stateManager.state.filters.status;
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(course => {
+        const isCompleted = this.stateManager.isCompleted(course.id);
+        const isAvailable = this.stateManager.isAvailable(course);
+
+        if (statusFilter === 'completed') {
+          return isCompleted;
+        } else if (statusFilter === 'available') {
+          return !isCompleted && isAvailable;
+        } else if (statusFilter === 'locked') {
+          return !isCompleted && !isAvailable;
+        }
+        return true;
+      });
+    }
+
+    return filtered;
+  }
+
+  /**
+   * Fetch topologically sorted courses from backend API
+   */
+  async fetchSortedCourses() {
+    try {
+      this.sortedCourses = await apiClient.getTopologicalSort();
+    } catch (error) {
+      console.error('Error fetching sorted courses:', error);
+      
+      if (error instanceof APIError && error.status === 409) {
+        // Circular dependency detected
+        // Extract cycle information from error details if available
+        const cycleInfo = error.details?.cycle || [];
+        this.displayCircularDependencyError(cycleInfo);
+        throw error; // Re-throw to be caught by update()
+      }
+      
+      throw new Error('Failed to load course timeline. Please try again.');
+    }
+  }
+
+  /**
+   * Display circular dependency error with affected courses
+   * @param {Array} cycle - Array of course IDs in the cycle
+   */
+  displayCircularDependencyError(cycle) {
+    if (!this.timelineContainer) return;
+
+    // Get course names for the cycle
+    const cycleNames = cycle.map(courseId => {
+      const course = this.stateManager.state.courses.find(c => c.id === courseId);
+      return course ? course.name : courseId;
+    });
+
+    const cycleText = cycleNames.length > 0 
+      ? `<p class="cycle-courses">Affected courses: <strong>${cycleNames.join(' → ')}</strong></p>`
+      : '';
+
+    this.timelineContainer.innerHTML = `
+      <div class="timeline-error circular-dependency-error">
+        <div class="error-icon pulsing">⚠️</div>
+        <h3>Circular Dependency Detected</h3>
+        <p>A circular dependency has been detected in your course structure. This means some courses depend on each other in a loop, making it impossible to determine a valid learning order.</p>
+        ${cycleText}
+        <p class="error-help">Please edit the course dependencies to break the cycle.</p>
+      </div>
+    `;
+
+    // Highlight the cycle nodes in the graph view if available
+    if (graphView && cycle.length > 0) {
+      this.highlightCycleInGraph(cycle);
+    }
+
+    // Show error toast
+    toast.error('Circular dependency detected. Please fix the course dependencies to view the timeline.', 0);
+  }
+
+  /**
+   * Highlight cycle nodes in the graph view
+   * @param {Array} cycle - Array of course IDs in the cycle
+   */
+  highlightCycleInGraph(cycle) {
+    if (!graphView || !graphView.nodeElements) return;
+
+    // Add pulsing animation to cycle nodes
+    cycle.forEach(courseId => {
+      if (graphView.nodeElements) {
+        const nodeSelection = graphView.nodeElements.filter(d => d.id === courseId);
+        
+        nodeSelection.select('circle:first-child')
+          .attr('stroke', '#ef4444') // Red for error
+          .attr('stroke-width', 3)
+          .style('animation', 'pulse 2s ease-in-out infinite');
+      }
+    });
+
+    // Highlight edges between cycle nodes
+    if (graphView.linkElements) {
+      graphView.linkElements
+        .filter(link => {
+          const sourceId = link.source.id || link.source;
+          const targetId = link.target.id || link.target;
+          return cycle.includes(sourceId) && cycle.includes(targetId);
+        })
+        .attr('stroke', '#ef4444')
+        .attr('stroke-width', 3)
+        .style('opacity', 1);
+    }
+  }
+
+  /**
+   * Group courses into levels based on dependencies
+   * Each level contains courses that can be taken in parallel
+   */
+  groupIntoLevels() {
+    this.levels = [];
+    const processed = new Map(); // Map of course ID to level number
+    
+    // Process courses in topological order
+    this.sortedCourses.forEach(course => {
+      const level = this.calculateLevel(course, processed);
+      
+      // Add course to the appropriate level
+      if (!this.levels[level]) {
+        this.levels[level] = [];
+      }
+      this.levels[level].push(course);
+      
+      // Mark as processed
+      processed.set(course.id, level);
+    });
+  }
+
+  /**
+   * Calculate the level for a course based on its dependencies
+   * @param {Object} course - Course object
+   * @param {Map} processed - Map of processed courses to their levels
+   * @returns {number} Level number (0-indexed)
+   */
+  calculateLevel(course, processed) {
+    // If no dependencies, it's at level 0
+    if (!course.dependencies || course.dependencies.length === 0) {
+      return 0;
+    }
+    
+    // Find the maximum level of all dependencies
+    let maxDepLevel = -1;
+    course.dependencies.forEach(depId => {
+      if (processed.has(depId)) {
+        const depLevel = processed.get(depId);
+        maxDepLevel = Math.max(maxDepLevel, depLevel);
+      }
+    });
+    
+    // This course is one level after its highest dependency
+    return maxDepLevel + 1;
+  }
+
+  /**
+   * Render the timeline with all levels
+   */
+  render() {
+    this.timelineContainer.innerHTML = '';
+    
+    // Render each level
+    this.levels.forEach((levelCourses, levelIndex) => {
+      const levelElement = this.createLevelElement(levelCourses, levelIndex);
+      this.timelineContainer.appendChild(levelElement);
+    });
+  }
+
+  /**
+   * Create a level element with its courses
+   * @param {Array} courses - Courses in this level
+   * @param {number} levelIndex - Level index (0-indexed)
+   * @returns {HTMLElement} Level element
+   */
+  createLevelElement(courses, levelIndex) {
+    const levelDiv = document.createElement('div');
+    levelDiv.className = 'timeline-level';
+    levelDiv.setAttribute('data-level', levelIndex);
+    
+    // Create level header
+    const header = document.createElement('div');
+    header.className = 'timeline-level-header';
+    header.innerHTML = `
+      <span class="timeline-level-number">Level ${levelIndex + 1}</span>
+      <span class="timeline-level-info">${courses.length} ${courses.length === 1 ? 'course' : 'courses'}</span>
+    `;
+    levelDiv.appendChild(header);
+    
+    // Create courses container
+    const coursesContainer = document.createElement('div');
+    coursesContainer.className = 'timeline-courses';
+    
+    // Add course cards
+    courses.forEach(course => {
+      const card = this.createTimelineCourseCard(course);
+      coursesContainer.appendChild(card);
+    });
+    
+    levelDiv.appendChild(coursesContainer);
+    
+    return levelDiv;
+  }
+
+  /**
+   * Create a timeline course card
+   * @param {Object} course - Course object
+   * @returns {HTMLElement} Course card element
+   */
+  createTimelineCourseCard(course) {
+    const card = document.createElement('div');
+    card.className = 'timeline-course-card';
+    card.setAttribute('data-course-id', course.id);
+    
+    // Determine course status
+    const isCompleted = this.stateManager.isCompleted(course.id);
+    const isAvailable = this.stateManager.isAvailable(course);
+    
+    if (isCompleted) {
+      card.classList.add('completed');
+    } else if (isAvailable) {
+      card.classList.add('available');
+    } else {
+      card.classList.add('locked');
+    }
+
+    // Add status indicator
+    let statusIndicator = '';
+    if (isCompleted) {
+      statusIndicator = '<span class="status-badge completed" aria-label="Completed">✓ Completed</span>';
+    } else if (isAvailable) {
+      statusIndicator = '<span class="status-badge available" aria-label="Available">● Available</span>';
+    } else {
+      statusIndicator = '<span class="status-badge locked" aria-label="Locked">🔒 Locked</span>';
+    }
+
+    // Highlight search matches
+    const searchQuery = this.stateManager.state.searchQuery.trim();
+    const displayName = searchQuery ? this.highlightText(course.name, searchQuery) : this.escapeHtml(course.name);
+    const displayDesc = course.description 
+      ? (searchQuery ? this.highlightText(course.description, searchQuery) : this.escapeHtml(course.description))
+      : '<em>No description</em>';
+
+    card.innerHTML = `
+      <div class="timeline-card-header">
+        <div class="timeline-card-title-wrapper">
+          <h4 class="timeline-card-title">${displayName}</h4>
+          ${statusIndicator}
+        </div>
+        <input 
+          type="checkbox" 
+          class="timeline-card-checkbox" 
+          ${isCompleted ? 'checked' : ''}
+          aria-label="Mark ${this.escapeHtml(course.name)} as ${isCompleted ? 'incomplete' : 'complete'}"
+          data-course-id="${course.id}">
+      </div>
+      <div class="timeline-card-body">
+        <p class="timeline-card-description">${displayDesc}</p>
+      </div>
+    `;
+
+    // Add click handler to open detail panel (but not on checkbox)
+    card.addEventListener('click', (e) => {
+      // Don't open panel if clicking checkbox
+      if (e.target.classList.contains('timeline-card-checkbox')) {
+        return;
+      }
+      openDetailPanel(course);
+    });
+
+    // Add checkbox handler
+    const checkbox = card.querySelector('.timeline-card-checkbox');
+    checkbox.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent card click
+      this.toggleCompletion(course.id);
+    });
+
+    // Add hover effect for cross-view synchronization
+    card.addEventListener('mouseenter', () => {
+      this.highlightCourse(course.id, true);
+    });
+    
+    card.addEventListener('mouseleave', () => {
+      this.highlightCourse(course.id, false);
+    });
+
+    // Add keyboard support
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `${course.name} course card. ${isCompleted ? 'Completed' : isAvailable ? 'Available' : 'Locked'}`);
+    
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openDetailPanel(course);
+      }
+    });
+
+    return card;
+  }
+
+  /**
+   * Toggle course completion status
+   * @param {string} courseId - Course ID
+   */
+  async toggleCompletion(courseId) {
+    try {
+      await this.stateManager.toggleCompletion(courseId);
+      
+      // Re-render to update card status
+      await this.update(this.stateManager.state.courses);
+    } catch (error) {
+      console.error('Error toggling completion:', error);
+      // The state has already been reverted in StateManager
+      // Just re-render to show the correct state
+      await this.update(this.stateManager.state.courses);
+    }
+  }
+
+  /**
+   * Highlight a course (for cross-view synchronization)
+   * @param {string} courseId - Course ID to highlight
+   * @param {boolean} highlight - Whether to highlight or unhighlight
+   */
+  highlightCourse(courseId, highlight) {
+    // Find the card for this course
+    const card = this.timelineContainer.querySelector(`[data-course-id="${courseId}"]`);
+    if (card) {
+      card.classList.toggle('highlighted', highlight);
+    }
+    
+    // Also trigger highlight in graph view if it exists
+    // This enables cross-view synchronization
+    if (graphView && typeof graphView.highlightNodeExternal === 'function') {
+      graphView.highlightNodeExternal(courseId, highlight);
+    }
+  }
+
+  /**
+   * Highlight a course externally (for cross-view synchronization from graph)
+   * @param {string} courseId - Course ID to highlight
+   * @param {boolean} highlight - Whether to highlight or unhighlight
+   */
+  highlightCourseExternal(courseId, highlight) {
+    // Find the card for this course
+    const card = this.timelineContainer.querySelector(`[data-course-id="${courseId}"]`);
+    if (card) {
+      card.classList.toggle('highlighted', highlight);
+      
+      // Scroll the card into view if highlighting
+      if (highlight) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }
+
+  /**
+   * Highlight matching text in search results
+   * @param {string} text - Text to highlight
+   * @param {string} query - Search query
+   * @returns {string} HTML with highlighted text
+   */
+  highlightText(text, query) {
+    if (!query || !text) return this.escapeHtml(text);
+    
+    const escapedText = this.escapeHtml(text);
+    const escapedQuery = this.escapeHtml(query);
+    
+    // Case-insensitive replace
+    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+    return escapedText.replace(regex, '<mark class="search-highlight">$1</mark>');
+  }
+
+  /**
+   * Escape HTML to prevent XSS
+   * @param {string} text - Text to escape
+   * @returns {string} Escaped text
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+}
+
+// ============================================
 // Global Application Instance
 // ============================================
 
@@ -2416,6 +3053,7 @@ let courseModal = null; // Will be initialized after DOM loads
 let confirmDialog = null; // Will be initialized after DOM loads
 let listView = null; // Will be initialized after DOM loads
 let graphView = null; // Will be initialized after DOM loads
+let timelineView = null; // Will be initialized after DOM loads
 
 // ============================================
 // Application Initialization
@@ -2426,6 +3064,8 @@ let graphView = null; // Will be initialized after DOM loads
  */
 async function initializeApp() {
   try {
+    console.log('Initializing boo-learner application...');
+    
     // Load saved preferences and state
     const preferences = storageService.loadPreferences();
     const completedCourses = storageService.loadCompletedCourses();
@@ -2456,10 +3096,18 @@ async function initializeApp() {
     // Restore search query and filters in UI
     restoreUIState();
 
-    console.log('Application initialized successfully');
+    console.log('✓ Application initialized successfully');
+    console.log(`✓ Loaded ${stateManager.state.courses.length} courses`);
+    console.log(`✓ ${stateManager.state.completedCourses.size} courses completed`);
+    console.log(`✓ Active view: ${stateManager.state.viewMode}`);
   } catch (error) {
-    console.error('Error initializing application:', error);
-    toast.error('Failed to initialize application. Please refresh the page.');
+    console.error('✗ Error initializing application:', error);
+    toast.error('Failed to initialize application. Please refresh the page.', 0);
+    
+    // Try to show a helpful error message
+    if (!navigator.onLine) {
+      toast.error('You appear to be offline. Please check your internet connection.', 0);
+    }
   }
 }
 
@@ -2489,25 +3137,74 @@ async function loadCourses() {
  * Initialize UI components
  */
 function initializeUI() {
-  // Initialize course modal
-  courseModal = new CourseModalManager();
-  
-  // Initialize confirm dialog
-  confirmDialog = new ConfirmDialog();
-  
-  // Initialize list view
-  const listContainer = document.getElementById('list-view');
-  if (listContainer) {
-    listView = new ListView(listContainer, stateManager);
+  try {
+    // Initialize course modal
+    courseModal = new CourseModalManager();
+    console.log('✓ Course modal initialized');
+  } catch (error) {
+    console.error('✗ Failed to initialize course modal:', error);
   }
   
-  // Initialize graph view
-  const graphContainer = document.getElementById('graph-view');
-  if (graphContainer) {
-    graphView = new GraphView(graphContainer, stateManager);
+  try {
+    // Initialize confirm dialog
+    confirmDialog = new ConfirmDialog();
+    console.log('✓ Confirm dialog initialized');
+  } catch (error) {
+    console.error('✗ Failed to initialize confirm dialog:', error);
   }
   
-  console.log('UI components initialized');
+  try {
+    // Initialize list view
+    const listContainer = document.getElementById('list-view');
+    if (listContainer) {
+      listView = new ListView(listContainer, stateManager);
+      console.log('✓ List view initialized');
+    } else {
+      console.warn('⚠ List view container not found');
+    }
+  } catch (error) {
+    console.error('✗ Failed to initialize list view:', error);
+  }
+  
+  try {
+    // Initialize graph view
+    const graphContainer = document.getElementById('graph-view');
+    if (graphContainer) {
+      graphView = new GraphView(graphContainer, stateManager);
+      console.log('✓ Graph view initialized');
+    } else {
+      console.warn('⚠ Graph view container not found');
+    }
+  } catch (error) {
+    console.error('✗ Failed to initialize graph view:', error);
+    // Show error in graph container if it exists
+    const graphContainer = document.getElementById('graph-view');
+    if (graphContainer) {
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'graph-error';
+      errorDiv.innerHTML = `
+        <div class="error-icon">⚠️</div>
+        <h3>Graph View Unavailable</h3>
+        <p>Failed to initialize graph visualization. Please try refreshing the page.</p>
+      `;
+      graphContainer.appendChild(errorDiv);
+    }
+  }
+  
+  try {
+    // Initialize timeline view
+    const timelineContainer = document.getElementById('timeline-view');
+    if (timelineContainer) {
+      timelineView = new TimelineView(timelineContainer, stateManager);
+      console.log('✓ Timeline view initialized');
+    } else {
+      console.warn('⚠ Timeline view container not found');
+    }
+  } catch (error) {
+    console.error('✗ Failed to initialize timeline view:', error);
+  }
+  
+  console.log('✓ UI components initialization complete');
 }
 
 /**
@@ -2542,6 +3239,9 @@ function setupEventListeners() {
   // Set up detail panel
   setupDetailPanel();
 
+  // Set up keyboard shortcuts
+  setupKeyboardShortcuts();
+
   // Subscribe to state changes
   stateManager.subscribe(handleStateChange);
 }
@@ -2551,31 +3251,60 @@ function setupEventListeners() {
  * @param {Object} state - New state
  */
 function handleStateChange(state) {
-  // Save preferences when they change (including filters and searchQuery)
-  const preferencesToSave = {
-    ...state.preferences,
-    filters: state.filters,
-    searchQuery: state.searchQuery
-  };
-  storageService.savePreferences(preferencesToSave);
-  
-  // Save completed courses when they change
-  storageService.saveCompletedCourses(state.completedCourses);
-  
-  // Update progress indicator
-  updateProgressIndicator(state);
-  
-  // Update list view if it's active
-  if (listView && state.viewMode === 'list') {
-    listView.update(state.courses);
+  try {
+    // Save preferences when they change (including filters and searchQuery)
+    const preferencesToSave = {
+      ...state.preferences,
+      filters: state.filters,
+      searchQuery: state.searchQuery
+    };
+    storageService.savePreferences(preferencesToSave);
+    
+    // Save completed courses when they change
+    storageService.saveCompletedCourses(state.completedCourses);
+  } catch (error) {
+    console.error('Error saving state to storage:', error);
+    // Continue execution even if storage fails
   }
   
-  // Update graph view if it's active
-  if (graphView && state.viewMode === 'graph') {
-    graphView.update(state.courses);
+  try {
+    // Update progress indicator
+    updateProgressIndicator(state);
+  } catch (error) {
+    console.error('Error updating progress indicator:', error);
   }
   
-  console.log('State updated:', state);
+  // Update ALL views to ensure synchronization
+  // This ensures that when data changes (courses added/deleted/updated,
+  // completion status changed, filters applied, search performed),
+  // all views reflect the same state even if they're not currently visible
+  
+  // Update list view
+  if (listView) {
+    try {
+      listView.update(state.courses);
+    } catch (error) {
+      console.error('Error updating list view:', error);
+    }
+  }
+  
+  // Update graph view
+  if (graphView) {
+    try {
+      graphView.update(state.courses);
+    } catch (error) {
+      console.error('Error updating graph view:', error);
+    }
+  }
+  
+  // Update timeline view
+  if (timelineView) {
+    try {
+      timelineView.update(state.courses);
+    } catch (error) {
+      console.error('Error updating timeline view:', error);
+    }
+  }
 }
 
 /**
@@ -2603,17 +3332,23 @@ function restoreUIState() {
  * @param {string} viewMode - View mode: 'graph', 'timeline', 'list'
  */
 function switchView(viewMode) {
-  // Update state
+  // Validate view mode
+  if (!['graph', 'timeline', 'list'].includes(viewMode)) {
+    console.error(`Invalid view mode: ${viewMode}`);
+    return;
+  }
+
+  // Update state with new view mode
   stateManager.setState({ viewMode });
 
-  // Update view buttons
+  // Update view buttons active state
   document.querySelectorAll('.view-btn').forEach(btn => {
     const isActive = btn.dataset.view === viewMode;
     btn.classList.toggle('active', isActive);
     btn.setAttribute('aria-pressed', isActive);
   });
 
-  // Update view containers
+  // Update view containers visibility
   document.querySelectorAll('.view').forEach(view => {
     view.classList.remove('active');
   });
@@ -2623,16 +3358,21 @@ function switchView(viewMode) {
     activeView.classList.add('active');
   }
 
-  // Render the active view
+  // Render the active view with current courses
   if (viewMode === 'list' && listView) {
     listView.update(stateManager.state.courses);
   } else if (viewMode === 'graph' && graphView) {
     graphView.update(stateManager.state.courses);
+  } else if (viewMode === 'timeline' && timelineView) {
+    timelineView.update(stateManager.state.courses);
   }
 
-  // Save preference
+  // Save view mode preference to local storage
   const preferences = { ...stateManager.state.preferences, viewMode };
   stateManager.setState({ preferences });
+  storageService.savePreferences(preferences);
+  
+  console.log(`Switched to ${viewMode} view`);
 }
 
 /**
@@ -2861,12 +3601,8 @@ function setupSearch() {
 
   // Debounced search handler
   const handleSearch = (query) => {
+    // Update state - this will trigger handleStateChange which updates all views
     stateManager.setState({ searchQuery: query });
-    
-    // Update list view if active
-    if (listView && stateManager.state.viewMode === 'list') {
-      listView.update(stateManager.state.courses);
-    }
   };
 
   // Input event with debouncing (300ms delay)
@@ -2894,19 +3630,6 @@ function setupSearch() {
       handleSearch(e.target.value);
     }
   });
-
-  // Focus search with '/' keyboard shortcut
-  document.addEventListener('keydown', (e) => {
-    // Don't trigger if user is typing in an input
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-      return;
-    }
-    
-    if (e.key === '/') {
-      e.preventDefault();
-      searchInput.focus();
-    }
-  });
 }
 
 /**
@@ -2923,18 +3646,149 @@ function setupFilters() {
       filterButtons.forEach(b => b.classList.remove('active'));
       e.currentTarget.classList.add('active');
       
-      // Update state
+      // Update state - this will trigger handleStateChange which updates all views
       stateManager.setState({ 
         filters: { status: filterValue } 
       });
-      
-      // Update list view if active
-      if (listView && stateManager.state.viewMode === 'list') {
-        listView.update(stateManager.state.courses);
-      }
     });
   });
 }
+
+/**
+ * Set up keyboard shortcuts for view switching and other actions
+ */
+function setupKeyboardShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    // Don't trigger shortcuts if user is typing in an input or textarea
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+      // Exception: Allow '/' to focus search even from inputs
+      if (e.key === '/' && e.target.id !== 'search-input') {
+        e.preventDefault();
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+          searchInput.focus();
+        }
+      }
+      return;
+    }
+    
+    // View switching shortcuts: 1, 2, 3
+    if (e.key === '1') {
+      e.preventDefault();
+      switchView('graph');
+    } else if (e.key === '2') {
+      e.preventDefault();
+      switchView('timeline');
+    } else if (e.key === '3') {
+      e.preventDefault();
+      switchView('list');
+    }
+    
+    // Focus search with '/'
+    else if (e.key === '/') {
+      e.preventDefault();
+      const searchInput = document.getElementById('search-input');
+      if (searchInput) {
+        searchInput.focus();
+      }
+    }
+    
+    // New course with 'n'
+    else if (e.key === 'n' || e.key === 'N') {
+      e.preventDefault();
+      openCourseModal();
+    }
+    
+    // Show keyboard shortcuts help with '?'
+    else if (e.key === '?') {
+      e.preventDefault();
+      showKeyboardShortcuts();
+    }
+  });
+}
+
+/**
+ * Show keyboard shortcuts modal
+ */
+function showKeyboardShortcuts() {
+  const modal = document.getElementById('shortcuts-modal');
+  if (!modal) return;
+  
+  // Show modal
+  modal.classList.add('open');
+  
+  // Set up close handlers
+  const closeButtons = modal.querySelectorAll('.shortcuts-close');
+  const overlay = modal.querySelector('.modal-overlay');
+  
+  const closeModal = () => {
+    modal.classList.add('closing');
+    setTimeout(() => {
+      modal.classList.remove('open', 'closing');
+    }, 300);
+  };
+  
+  closeButtons.forEach(btn => {
+    btn.onclick = closeModal;
+  });
+  
+  if (overlay) {
+    overlay.onclick = closeModal;
+  }
+  
+  // Close on Escape
+  const handleEscape = (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+      document.removeEventListener('keydown', handleEscape);
+    }
+  };
+  
+  document.addEventListener('keydown', handleEscape);
+}
+
+// ============================================
+// Global Error Handlers
+// ============================================
+
+/**
+ * Global error handler for unhandled errors
+ */
+window.addEventListener('error', (event) => {
+  console.error('Unhandled error:', event.error);
+  
+  // Don't show toast for every error, only critical ones
+  if (event.error && event.error.message) {
+    const message = event.error.message.toLowerCase();
+    
+    // Show toast for critical errors
+    if (message.includes('network') || message.includes('fetch') || message.includes('api')) {
+      if (toast) {
+        toast.error('A network error occurred. Please check your connection.', 5000);
+      }
+    }
+  }
+  
+  // Don't prevent default error handling
+  return false;
+});
+
+/**
+ * Global handler for unhandled promise rejections
+ */
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason);
+  
+  // Show toast for API errors
+  if (event.reason instanceof APIError) {
+    if (toast) {
+      toast.error(`Error: ${event.reason.message}`, 5000);
+    }
+  }
+  
+  // Prevent default error handling
+  event.preventDefault();
+});
 
 // ============================================
 // Start Application

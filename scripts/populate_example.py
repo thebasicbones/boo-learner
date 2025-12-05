@@ -10,7 +10,9 @@ from app.schemas import ResourceCreate
 async def populate_data():
     """Populate database with example resources."""
     await init_database()
-    repository = get_repository()
+    from app.database_mongodb import get_db_client
+    db = get_db_client()
+    repository = get_repository(db)
     
     # Create sample resources
     resources = [

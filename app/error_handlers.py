@@ -5,7 +5,6 @@ import logging
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.exceptions import (
     CircularDependencyError,
@@ -18,7 +17,7 @@ from app.exceptions import (
 logger = logging.getLogger(__name__)
 
 
-def register_exception_handlers(app):
+def register_error_handlers(app):
     """
     Register all global exception handlers with the FastAPI application.
 
@@ -179,27 +178,6 @@ def register_exception_handlers(app):
                 "error": "ValidationError",
                 "message": "Request validation failed",
                 "details": {"validation_errors": errors},
-            },
-        )
-
-    @app.exception_handler(SQLAlchemyError)
-    async def sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
-        """
-        Handle SQLAlchemy database errors.
-        Returns HTTP 500 without exposing sensitive database details.
-        """
-        logger.error(
-            f"Database error - Path: {request.url.path}",
-            exc_info=True,
-            extra={"path": request.url.path},
-        )
-
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "error": "DatabaseError",
-                "message": "A database error occurred",
-                "details": {},
             },
         )
 
