@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     
     # Database Configuration
     database_type: Literal["sqlite", "mongodb"] = "mongodb"
-mongodb_url: str = Field(
+    mongodb_url: str = Field(
         default="mongodb://localhost:27017",
         description="MongoDB connection URL"
     )
@@ -19,7 +19,8 @@ mongodb_url: str = Field(
         default="boo_learner",
         description="MongoDB database name"
     )
-# Application Configuration
+    
+    # Application Configuration
     environment: Literal["development", "staging", "production"] = "development"
     log_level: str = "INFO"
     

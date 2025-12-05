@@ -9,14 +9,17 @@ from app.database_mongodb import (
     get_db_client
 )
 from app.repositories.mongodb_resource_repository import MongoDBResourceRepository
+
 async def init_database():
     """Initialize the database connection."""
     settings = get_settings()
-await init_mongodb()
+    await init_mongodb()
+
 async def close_database():
     """Close the database connection."""
-await close_mongodb()
+    await close_mongodb()
+
 def get_repository():
     """Get the appropriate repository based on database type."""
     settings = get_settings()
-return MongoDBResourceRepository()
+    return MongoDBResourceRepository()
