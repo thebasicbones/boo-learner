@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Test</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        #graph-container {
+            width: 100%;
+            height: 600px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover {
+            background: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button onclick="resetView()">Reset View</button>
+        <button onclick="zoomIn()">Zoom In</button>
+        <button onclick="zoomOut()">Zoom Out</button>
+        <button onclick="addNode()">Add Node</button>
+    </div>
+    <div id="graph-container"></div>
+
+    <script>
+        // Test data
+        let nodes = [
+            { id: '1', name: 'Intro to Programming', completed: true, available: true, dependencies: [] },
+            { id: '2', name: 'Data Structures', completed: false, available: true, dependencies: ['1'] },
+            { id: '3', name: 'Algorithms', completed: false, available: false, dependencies: ['2'] },
+            { id: '4', name: 'Web Development', completed: false, available: true, dependencies: ['1'] }
+        ];
+
+        let links = [
+            { source: '1', target: '2' },
+            { source: '2', target: '3' },
+            { source: '1', target: '4' }
+        ];
+
+        const container = document.getElementById('graph-container');
+        const rect = container.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+
+        // Create SVG
+        const svg = d3.select('#graph-container')
+            .append('svg')
+            .attr('width', '100%')
+            .attr('height', '100%')
+            .attr('viewBox', [0, 0, width, height]);
+
+        // Add arrow markers
+        const defs = svg.append('defs');
+        defs.append('marker')
+            .attr('id', 'arrowhead')
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 25)
+            .attr('refY', 0)
+            .attr('markerWidth', 6)
+            .attr('markerHeight', 6)
+            .attr('orient', 'auto')
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', '#cbd5e1');
+
+        // Create main group
+        const g = svg.append('g');
+
+        // Create groups
+        g.append('g').attr('class', 'links');
+        g.append('g').attr('class', 'nodes');
+        g.append('g').attr('class', 'labels');
+
+        // Set up zoom
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on('zoom', (event) => {
+                g.attr('transform', event.transform);
+            });
+
+        svg.call(zoom);
+
+        // Initial transform
+        const initialTransform = d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(0.8);
+        svg.call(zoom.transform, initialTransform);
+
+        // Set up simulation
+        const simulation = d3.forceSimulation(nodes)
+            .force('link', d3.forceLink(links).id(d => d.id).distance(150))
+            .force('charge', d3.forceManyBody().strength(-400))
+            .force('center', d3.forceCenter(0, 0))
+            .force('collision', d3.forceCollide().radius(60));
+
+        // Render function
+        function render() {
+            // Render links
+            const link = g.select('.links').selectAll('line')
+                .data(links, d => `${d.source.id || d.source}-${d.target.id || d.target}`);
+
+            link.exit().remove();
+
+            const linkEnter = link.enter()
+                .append('line')
+                .attr('stroke', '#cbd5e1')
+                .attr('stroke-width', 2)
+                .attr('marker-end', 'url(#arrowhead)');
+
+            // Render nodes
+            const node = g.select('.nodes').selectAll('g')
+                .data(nodes, d => d.id);
+
+            node.exit().remove();
+
+            const nodeEnter = node.enter()
+                .append('g')
+                .attr('cursor', 'pointer');
+
+            nodeEnter.append('circle')
+                .attr('r', 20)
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 2)
+                .attr('fill', d => {
+                    if (d.completed) return '#6366f1';
+                    if (d.available) return '#10b981';
+                    return '#9ca3af';
+                })
+                .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))');
+
+            const nodeUpdate = nodeEnter.merge(node);
+
+            // Render labels
+            const label = g.select('.labels').selectAll('text')
+                .data(nodes, d => d.id);
+
+            label.exit().remove();
+
+            const labelEnter = label.enter()
+                .append('text')
+                .attr('text-anchor', 'middle')
+                .attr('dy', 35)
+                .attr('fill', '#fff')
+                .attr('font-size', '12px')
+                .attr('font-weight', '500')
+                .style('text-shadow', '0 1px 2px rgba(0,0,0,0.5)')
+                .text(d => d.name);
+
+            // Update simulation
+            simulation.nodes(nodes);
+            simulation.force('link').links(links);
+            simulation.alpha(1).restart();
+        }
+
+        // Tick function
+        simulation.on('tick', () => {
+            g.select('.links').selectAll('line')
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+
+            g.select('.nodes').selectAll('g')
+                .attr('transform', d => `translate(${d.x},${d.y})`);
+
+            g.select('.labels').selectAll('text')
+                .attr('x', d => d.x)
+                .attr('y', d => d.y);
+        });
+
+        // Control functions
+        function resetView() {
+            svg.transition()
+                .duration(750)
+                .call(zoom.transform, initialTransform);
+        }
+
+        function zoomIn() {
+            svg.transition()
+                .duration(300)
+                .call(zoom.scaleBy, 1.3);
+        }
+
+        function zoomOut() {
+            svg.transition()
+                .duration(300)
+                .call(zoom.scaleBy, 0.7);
+        }
+
+        let nodeCounter = 5;
+        function addNode() {
+            const newNode = {
+                id: String(nodeCounter++),
+                name: `Course ${nodeCounter - 1}`,
+                completed: false,
+                available: Math.random() > 0.5,
+                dependencies: []
+            };
+            nodes.push(newNode);
+            render();
+        }
+
+        // Initial render
+        render();
+    </script>
+</body>
+</html>

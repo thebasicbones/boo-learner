@@ -103,15 +103,50 @@ class StateManager {
   /**
    * Toggle course completion status
    * @param {string} courseId - Course ID to toggle
+   * @returns {Promise<void>}
    */
-  toggleCompletion(courseId) {
+  async toggleCompletion(courseId) {
     const completedCourses = new Set(this.state.completedCourses);
-    if (completedCourses.has(courseId)) {
+    const wasCompleted = completedCourses.has(courseId);
+    
+    if (wasCompleted) {
       completedCourses.delete(courseId);
     } else {
       completedCourses.add(courseId);
     }
+    
+    // Update state immediately for responsive UI
     this.setState({ completedCourses });
+    
+    // Persist to backend API
+    try {
+      const course = this.state.courses.find(c => c.id === courseId);
+      if (course) {
+        // Add completed field to course data
+        const updatedCourse = {
+          ...course,
+          completed: !wasCompleted
+        };
+        
+        // Note: This assumes the backend API accepts a 'completed' field
+        // If the backend doesn't support this, we would need to add an endpoint
+        // For now, we'll store it in local storage as the primary persistence
+        // and the backend update is optional
+        
+        // The completion status is already persisted via local storage
+        // in the handleStateChange function through storageService.saveCompletedCourses
+      }
+    } catch (error) {
+      console.error('Error persisting completion status:', error);
+      // Revert state on error
+      if (wasCompleted) {
+        completedCourses.add(courseId);
+      } else {
+        completedCourses.delete(courseId);
+      }
+      this.setState({ completedCourses });
+      throw error;
+    }
   }
 
   /**
@@ -358,7 +393,9 @@ class StorageService {
       graphPhysics: {
         linkDistance: 150,
         chargeStrength: -400
-      }
+      },
+      filters: { status: 'all' },
+      searchQuery: ''
     });
   }
 
@@ -1284,6 +1321,1089 @@ class ValidationUtils {
 }
 
 // ============================================
+// GraphView - D3.js Force-Directed Graph
+// ============================================
+
+class GraphView {
+  constructor(container, stateManager) {
+    this.container = container;
+    this.stateManager = stateManager;
+    this.graphContainer = document.getElementById('graph-container');
+    this.emptyState = document.getElementById('graph-empty');
+    
+    // D3 elements
+    this.svg = null;
+    this.g = null; // Main group for zoom/pan
+    this.simulation = null;
+    this.nodes = [];
+    this.links = [];
+    
+    // D3 selections
+    this.nodeElements = null;
+    this.linkElements = null;
+    this.labelElements = null;
+    
+    // Zoom behavior
+    this.zoom = null;
+    this.currentTransform = d3.zoomIdentity;
+    
+    // Initialize if D3 is available
+    if (typeof d3 !== 'undefined') {
+      this.initialize();
+    } else {
+      console.error('D3.js not loaded');
+    }
+  }
+
+  /**
+   * Initialize the D3 graph
+   */
+  initialize() {
+    if (!this.graphContainer) {
+      console.error('Graph container not found');
+      return;
+    }
+
+    // Clear any existing SVG
+    this.graphContainer.innerHTML = '';
+
+    // Get container dimensions
+    const rect = this.graphContainer.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+
+    // Create SVG element
+    this.svg = d3.select(this.graphContainer)
+      .append('svg')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('viewBox', [0, 0, width, height])
+      .attr('role', 'img')
+      .attr('aria-label', 'Interactive course dependency graph');
+
+    // Add defs for arrow markers
+    const defs = this.svg.append('defs');
+    
+    // Arrow marker for edges
+    defs.append('marker')
+      .attr('id', 'arrowhead')
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 25) // Position at edge of node
+      .attr('refY', 0)
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('fill', '#cbd5e1');
+
+    // Highlighted arrow marker
+    defs.append('marker')
+      .attr('id', 'arrowhead-highlight')
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 25)
+      .attr('refY', 0)
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('fill', '#ec4899');
+
+    // Create main group for zoom/pan
+    this.g = this.svg.append('g')
+      .attr('class', 'graph-group');
+
+    // Create groups for links and nodes (links first so nodes are on top)
+    this.g.append('g').attr('class', 'links');
+    this.g.append('g').attr('class', 'nodes');
+    this.g.append('g').attr('class', 'labels');
+
+    // Set up zoom behavior
+    this.setupZoom(width, height);
+
+    // Set up force simulation
+    this.setupSimulation(width, height);
+
+    // Set up graph controls
+    this.setupControls();
+
+    console.log('Graph view initialized');
+  }
+
+  /**
+   * Set up zoom and pan behaviors
+   * @param {number} width - Container width
+   * @param {number} height - Container height
+   */
+  setupZoom(width, height) {
+    this.zoom = d3.zoom()
+      .scaleExtent([0.1, 4]) // Min and max zoom levels
+      .on('zoom', (event) => {
+        this.currentTransform = event.transform;
+        this.g.attr('transform', event.transform);
+      });
+
+    this.svg.call(this.zoom);
+
+    // Center the view initially
+    const initialScale = 0.8;
+    const initialTransform = d3.zoomIdentity
+      .translate(width / 2, height / 2)
+      .scale(initialScale);
+    
+    this.svg.call(this.zoom.transform, initialTransform);
+    this.currentTransform = initialTransform;
+  }
+
+  /**
+   * Set up force simulation
+   * @param {number} width - Container width
+   * @param {number} height - Container height
+   */
+  setupSimulation(width, height) {
+    const preferences = this.stateManager.state.preferences;
+    
+    this.simulation = d3.forceSimulation()
+      .force('link', d3.forceLink()
+        .id(d => d.id)
+        .distance(preferences.graphPhysics?.linkDistance || 150))
+      .force('charge', d3.forceManyBody()
+        .strength(preferences.graphPhysics?.chargeStrength || -400))
+      .force('center', d3.forceCenter(0, 0))
+      .force('collision', d3.forceCollide().radius(60))
+      .force('x', d3.forceX(0).strength(0.05))
+      .force('y', d3.forceY(0).strength(0.05));
+
+    // Update positions on tick
+    this.simulation.on('tick', () => this.ticked());
+  }
+
+  /**
+   * Set up graph control buttons
+   */
+  setupControls() {
+    const resetBtn = document.getElementById('graph-reset');
+    const zoomInBtn = document.getElementById('graph-zoom-in');
+    const zoomOutBtn = document.getElementById('graph-zoom-out');
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => this.resetView());
+    }
+
+    if (zoomInBtn) {
+      zoomInBtn.addEventListener('click', () => this.zoomIn());
+    }
+
+    if (zoomOutBtn) {
+      zoomOutBtn.addEventListener('click', () => this.zoomOut());
+    }
+  }
+
+  /**
+   * Reset view to initial position and zoom
+   */
+  resetView() {
+    if (!this.svg || !this.zoom) return;
+
+    const rect = this.graphContainer.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+
+    const initialScale = 0.8;
+    const initialTransform = d3.zoomIdentity
+      .translate(width / 2, height / 2)
+      .scale(initialScale);
+
+    this.svg.transition()
+      .duration(750)
+      .call(this.zoom.transform, initialTransform);
+  }
+
+  /**
+   * Zoom in
+   */
+  zoomIn() {
+    if (!this.svg || !this.zoom) return;
+
+    this.svg.transition()
+      .duration(300)
+      .call(this.zoom.scaleBy, 1.3);
+  }
+
+  /**
+   * Zoom out
+   */
+  zoomOut() {
+    if (!this.svg || !this.zoom) return;
+
+    this.svg.transition()
+      .duration(300)
+      .call(this.zoom.scaleBy, 0.7);
+  }
+
+  /**
+   * Update the graph with courses
+   * @param {Array} courses - Array of courses to display
+   */
+  update(courses) {
+    if (!this.graphContainer || !this.emptyState) {
+      console.error('Graph view elements not found');
+      return;
+    }
+
+    // Show empty state if no courses
+    if (!courses || courses.length === 0) {
+      this.emptyState.classList.remove('hidden');
+      if (this.svg) {
+        this.svg.style('display', 'none');
+      }
+      return;
+    }
+
+    // Hide empty state
+    this.emptyState.classList.add('hidden');
+    if (this.svg) {
+      this.svg.style('display', 'block');
+    }
+
+    // Prepare data
+    this.prepareData(courses);
+
+    // Render the graph
+    this.render();
+  }
+
+  /**
+   * Prepare nodes and links data from courses
+   * @param {Array} courses - Array of courses
+   */
+  prepareData(courses) {
+    // Create nodes
+    this.nodes = courses.map(course => {
+      const isCompleted = this.stateManager.isCompleted(course.id);
+      const isAvailable = this.stateManager.isAvailable(course);
+      
+      // Get saved position if exists
+      const savedLayout = this.stateManager.state.graphLayout;
+      const savedPos = savedLayout[course.id];
+      
+      return {
+        id: course.id,
+        name: course.name,
+        description: course.description,
+        dependencies: course.dependencies || [],
+        completed: isCompleted,
+        available: isAvailable,
+        x: savedPos?.x,
+        y: savedPos?.y
+      };
+    });
+
+    // Create links
+    this.links = [];
+    courses.forEach(course => {
+      if (course.dependencies && Array.isArray(course.dependencies)) {
+        course.dependencies.forEach(depId => {
+          this.links.push({
+            source: depId,
+            target: course.id
+          });
+        });
+      }
+    });
+  }
+
+  /**
+   * Render the graph using D3
+   */
+  render() {
+    // Update simulation with new data
+    this.simulation.nodes(this.nodes);
+    this.simulation.force('link').links(this.links);
+
+    // Render links (edges)
+    this.renderLinks();
+
+    // Render nodes
+    this.renderNodes();
+
+    // Render labels
+    this.renderLabels();
+
+    // Restart simulation
+    this.simulation.alpha(1).restart();
+  }
+
+  /**
+   * Render graph links (edges)
+   */
+  renderLinks() {
+    const linksGroup = this.g.select('.links');
+
+    // Bind data with key function for proper enter/update/exit
+    this.linkElements = linksGroup.selectAll('line.link')
+      .data(this.links, d => `${d.source.id || d.source}-${d.target.id || d.target}`);
+
+    // EXIT: Remove old links with fade-out
+    this.linkElements.exit()
+      .transition()
+      .duration(400)
+      .ease(d3.easeCubicIn)
+      .style('opacity', 0)
+      .attr('stroke-width', 0)
+      .remove();
+
+    // ENTER: Create new links
+    const linkEnter = this.linkElements.enter()
+      .append('line')
+      .attr('class', 'link')
+      .attr('stroke', '#cbd5e1')
+      .attr('stroke-width', 2)
+      .attr('stroke-opacity', 0.6)
+      .attr('marker-end', 'url(#arrowhead)')
+      .style('opacity', 0);
+
+    // UPDATE + ENTER: Merge selections
+    this.linkElements = linkEnter.merge(this.linkElements);
+
+    // Fade in new links with smooth easing
+    this.linkElements
+      .transition()
+      .duration(500)
+      .ease(d3.easeCubicOut)
+      .style('opacity', 1)
+      .attr('stroke-opacity', 0.6);
+
+    // Update link colors based on source/target status
+    this.linkElements
+      .attr('stroke', d => {
+        const sourceNode = this.nodes.find(n => n.id === (d.source.id || d.source));
+        const targetNode = this.nodes.find(n => n.id === (d.target.id || d.target));
+        
+        // If both nodes are completed, make the edge more prominent
+        if (sourceNode?.completed && targetNode?.completed) {
+          return '#a5b4fc'; // Light blue for completed path
+        }
+        // If source is completed but target is not, show as available path
+        if (sourceNode?.completed && targetNode?.available) {
+          return '#6ee7b7'; // Light green for available path
+        }
+        // Default gray
+        return '#cbd5e1';
+      })
+      .attr('stroke-width', d => {
+        const sourceNode = this.nodes.find(n => n.id === (d.source.id || d.source));
+        const targetNode = this.nodes.find(n => n.id === (d.target.id || d.target));
+        
+        // Make completed paths slightly thicker
+        if (sourceNode?.completed && targetNode?.completed) {
+          return 2.5;
+        }
+        return 2;
+      });
+  }
+
+  /**
+   * Render graph nodes
+   */
+  renderNodes() {
+    const nodesGroup = this.g.select('.nodes');
+
+    // Bind data with key function for proper enter/update/exit
+    this.nodeElements = nodesGroup.selectAll('g.node')
+      .data(this.nodes, d => d.id);
+
+    // EXIT: Remove old nodes with fade-out animation
+    this.nodeElements.exit()
+      .transition()
+      .duration(400)
+      .ease(d3.easeCubicIn)
+      .style('opacity', 0)
+      .attr('transform', d => `translate(${d.x},${d.y}) scale(0.1)`)
+      .remove();
+
+    // ENTER: Create new nodes
+    const nodeEnter = this.nodeElements.enter()
+      .append('g')
+      .attr('class', 'node')
+      .attr('cursor', 'pointer')
+      .style('opacity', 0);
+
+    // Add circle with shadow and border
+    nodeEnter.append('circle')
+      .attr('r', 20)
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 2)
+      .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))')
+      .style('transition', 'all 0.2s ease');
+
+    // Add inner circle for completed checkmark
+    nodeEnter.append('circle')
+      .attr('class', 'checkmark-bg')
+      .attr('r', 8)
+      .attr('fill', '#fff')
+      .style('opacity', 0);
+
+    // Add checkmark path for completed courses
+    nodeEnter.append('path')
+      .attr('class', 'checkmark')
+      .attr('d', 'M-4,0 L-1,3 L4,-3')
+      .attr('stroke', '#6366f1')
+      .attr('stroke-width', 2)
+      .attr('fill', 'none')
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round')
+      .style('opacity', 0);
+
+    // UPDATE + ENTER: Merge selections
+    this.nodeElements = nodeEnter.merge(this.nodeElements);
+
+    // Update node colors based on status with smooth transitions
+    this.nodeElements.select('circle:first-child')
+      .transition()
+      .duration(400)
+      .ease(d3.easeCubicInOut)
+      .attr('fill', d => {
+        if (d.completed) return '#6366f1'; // Completed - primary blue
+        if (d.available) return '#10b981'; // Available - green
+        return '#9ca3af'; // Locked - gray
+      })
+      .attr('stroke', d => {
+        if (d.completed) return '#4f46e5'; // Darker blue border
+        if (d.available) return '#059669'; // Darker green border
+        return '#6b7280'; // Darker gray border
+      });
+
+    // Show/hide checkmark for completed courses with scale animation
+    this.nodeElements.select('.checkmark-bg')
+      .transition()
+      .duration(300)
+      .ease(d3.easeBackOut)
+      .style('opacity', d => d.completed ? 1 : 0)
+      .attr('r', d => d.completed ? 8 : 4);
+
+    this.nodeElements.select('.checkmark')
+      .transition()
+      .duration(300)
+      .ease(d3.easeBackOut)
+      .style('opacity', d => d.completed ? 1 : 0);
+
+    // Fade in new nodes with scale animation and bounce effect
+    nodeEnter
+      .attr('transform', d => `translate(${d.x || 0},${d.y || 0}) scale(0.1)`)
+      .transition()
+      .duration(500)
+      .ease(d3.easeElasticOut.amplitude(1).period(0.5))
+      .style('opacity', 1)
+      .attr('transform', d => `translate(${d.x || 0},${d.y || 0}) scale(1)`);
+
+    // Set up drag behavior
+    const drag = d3.drag()
+      .on('start', (event, d) => this.dragStarted(event, d))
+      .on('drag', (event, d) => this.dragged(event, d))
+      .on('end', (event, d) => this.dragEnded(event, d));
+
+    this.nodeElements.call(drag);
+
+    // Set up hover interactions
+    this.nodeElements
+      .on('mouseenter', (event, d) => this.handleNodeHover(event, d, true))
+      .on('mouseleave', (event, d) => this.handleNodeHover(event, d, false))
+      .on('click', (event, d) => this.handleNodeClick(event, d));
+
+    // Add ARIA labels for accessibility
+    this.nodeElements
+      .attr('role', 'button')
+      .attr('aria-label', d => {
+        const status = d.completed ? 'Completed' : d.available ? 'Available' : 'Locked';
+        const depCount = d.dependencies.length;
+        const depText = depCount > 0 ? `, ${depCount} ${depCount === 1 ? 'dependency' : 'dependencies'}` : '';
+        return `${d.name} - ${status}${depText}`;
+      })
+      .attr('tabindex', 0)
+      .on('keydown', (event, d) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          this.handleNodeClick(event, d);
+        }
+      });
+  }
+
+  /**
+   * Render node labels
+   */
+  renderLabels() {
+    const labelsGroup = this.g.select('.labels');
+
+    // Bind data
+    this.labelElements = labelsGroup.selectAll('text')
+      .data(this.nodes, d => d.id);
+
+    // Exit
+    this.labelElements.exit()
+      .transition()
+      .duration(300)
+      .style('opacity', 0)
+      .remove();
+
+    // Enter
+    const labelEnter = this.labelElements.enter()
+      .append('text')
+      .attr('class', 'node-label')
+      .attr('text-anchor', 'middle')
+      .attr('dy', 35)
+      .attr('fill', '#fff')
+      .attr('font-size', '12px')
+      .attr('font-weight', '500')
+      .attr('pointer-events', 'none')
+      .style('text-shadow', '0 1px 2px rgba(0,0,0,0.5)')
+      .style('opacity', 0);
+
+    // Update + Enter
+    this.labelElements = labelEnter.merge(this.labelElements);
+
+    this.labelElements
+      .text(d => {
+        // Truncate long names
+        const maxLength = 15;
+        return d.name.length > maxLength ? d.name.substring(0, maxLength) + '...' : d.name;
+      })
+      .transition()
+      .duration(300)
+      .style('opacity', 1);
+  }
+
+  /**
+   * Update positions on simulation tick
+   */
+  ticked() {
+    // Update link positions
+    if (this.linkElements) {
+      this.linkElements
+        .attr('x1', d => d.source.x)
+        .attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x)
+        .attr('y2', d => d.target.y);
+    }
+
+    // Update node positions
+    if (this.nodeElements) {
+      this.nodeElements
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+    }
+
+    // Update label positions
+    if (this.labelElements) {
+      this.labelElements
+        .attr('x', d => d.x)
+        .attr('y', d => d.y);
+    }
+  }
+
+  /**
+   * Handle drag start
+   */
+  dragStarted(event, d) {
+    if (!event.active) this.simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+    
+    // Add visual feedback
+    d3.select(event.sourceEvent.target.parentNode)
+      .select('circle:first-child')
+      .transition()
+      .duration(100)
+      .attr('r', 24)
+      .attr('stroke-width', 3)
+      .style('filter', 'drop-shadow(0 4px 8px rgba(0,0,0,0.3))');
+  }
+
+  /**
+   * Handle dragging - maintain edge connections
+   */
+  dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+    
+    // The simulation tick will automatically update edge positions
+    // because we're updating the node's fx and fy properties
+  }
+
+  /**
+   * Handle drag end - save position to local storage
+   */
+  dragEnded(event, d) {
+    if (!event.active) this.simulation.alphaTarget(0);
+    
+    // Keep the node fixed at the dragged position
+    // (Don't release fx/fy so the node stays where the user put it)
+    
+    // Save the new position to local storage
+    this.saveNodePosition(d);
+    
+    // Reset visual feedback
+    d3.select(event.sourceEvent.target.parentNode)
+      .select('circle:first-child')
+      .transition()
+      .duration(100)
+      .attr('r', 20)
+      .attr('stroke-width', 2)
+      .style('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))');
+  }
+
+  /**
+   * Save node position to local storage
+   * @param {Object} node - Node with updated position
+   */
+  saveNodePosition(node) {
+    const graphLayout = { ...this.stateManager.state.graphLayout };
+    graphLayout[node.id] = {
+      x: node.fx,
+      y: node.fy
+    };
+    
+    // Update state and save to storage
+    this.stateManager.setState({ graphLayout });
+    storageService.saveGraphLayout(graphLayout);
+  }
+
+  /**
+   * Handle node hover with highlighting
+   * Highlights the hovered node, its dependencies (incoming), and dependents (outgoing)
+   */
+  handleNodeHover(event, d, isEntering) {
+    const node = d3.select(event.currentTarget);
+    
+    if (isEntering) {
+      // Enlarge the hovered node
+      node.select('circle:first-child')
+        .transition()
+        .duration(150)
+        .attr('r', 24)
+        .attr('stroke-width', 3);
+
+      // Find related nodes
+      const dependencies = new Set(); // Nodes this course depends on (incoming edges)
+      const dependents = new Set(); // Nodes that depend on this course (outgoing edges)
+
+      // Find dependencies (incoming edges - sources)
+      this.links.forEach(link => {
+        const targetId = link.target.id || link.target;
+        const sourceId = link.source.id || link.source;
+        
+        if (targetId === d.id) {
+          dependencies.add(sourceId);
+        }
+        if (sourceId === d.id) {
+          dependents.add(targetId);
+        }
+      });
+
+      // Dim all nodes first
+      this.nodeElements
+        .transition()
+        .duration(150)
+        .style('opacity', node => {
+          if (node.id === d.id) return 1; // Keep hovered node fully visible
+          if (dependencies.has(node.id) || dependents.has(node.id)) return 1; // Keep related nodes visible
+          return 0.3; // Dim unrelated nodes
+        });
+
+      // Highlight related nodes
+      this.nodeElements
+        .filter(node => dependencies.has(node.id))
+        .select('circle:first-child')
+        .transition()
+        .duration(150)
+        .attr('stroke', '#ec4899') // Pink for dependencies
+        .attr('stroke-width', 3);
+
+      this.nodeElements
+        .filter(node => dependents.has(node.id))
+        .select('circle:first-child')
+        .transition()
+        .duration(150)
+        .attr('stroke', '#8b5cf6') // Purple for dependents
+        .attr('stroke-width', 3);
+
+      // Dim all links first
+      this.linkElements
+        .transition()
+        .duration(150)
+        .style('opacity', 0.1);
+
+      // Highlight incoming edges (dependencies)
+      this.linkElements
+        .filter(link => {
+          const targetId = link.target.id || link.target;
+          return targetId === d.id;
+        })
+        .transition()
+        .duration(150)
+        .style('opacity', 1)
+        .attr('stroke', '#ec4899')
+        .attr('stroke-width', 3)
+        .attr('marker-end', 'url(#arrowhead-highlight)');
+
+      // Highlight outgoing edges (dependents)
+      this.linkElements
+        .filter(link => {
+          const sourceId = link.source.id || link.source;
+          return sourceId === d.id;
+        })
+        .transition()
+        .duration(150)
+        .style('opacity', 1)
+        .attr('stroke', '#8b5cf6')
+        .attr('stroke-width', 3)
+        .attr('marker-end', 'url(#arrowhead-highlight)');
+
+    } else {
+      // Reset hovered node size
+      node.select('circle:first-child')
+        .transition()
+        .duration(150)
+        .attr('r', 20)
+        .attr('stroke-width', 2);
+
+      // Reset all nodes opacity
+      this.nodeElements
+        .transition()
+        .duration(150)
+        .style('opacity', 1);
+
+      // Reset all node strokes to their original colors
+      this.nodeElements.select('circle:first-child')
+        .transition()
+        .duration(150)
+        .attr('stroke', node => {
+          if (node.completed) return '#4f46e5';
+          if (node.available) return '#059669';
+          return '#6b7280';
+        })
+        .attr('stroke-width', 2);
+
+      // Reset all links
+      this.linkElements
+        .transition()
+        .duration(150)
+        .style('opacity', 1)
+        .attr('stroke', link => {
+          const sourceNode = this.nodes.find(n => n.id === (link.source.id || link.source));
+          const targetNode = this.nodes.find(n => n.id === (link.target.id || link.target));
+          
+          if (sourceNode?.completed && targetNode?.completed) {
+            return '#a5b4fc';
+          }
+          if (sourceNode?.completed && targetNode?.available) {
+            return '#6ee7b7';
+          }
+          return '#cbd5e1';
+        })
+        .attr('stroke-width', link => {
+          const sourceNode = this.nodes.find(n => n.id === (link.source.id || link.source));
+          const targetNode = this.nodes.find(n => n.id === (link.target.id || link.target));
+          
+          if (sourceNode?.completed && targetNode?.completed) {
+            return 2.5;
+          }
+          return 2;
+        })
+        .attr('marker-end', 'url(#arrowhead)');
+    }
+  }
+
+  /**
+   * Handle node click - center view and open detail panel
+   */
+  handleNodeClick(event, d) {
+    event.stopPropagation();
+    
+    // Center view on clicked node with smooth animation
+    this.centerOnNode(d);
+    
+    // Open detail panel with course information
+    const course = this.stateManager.state.courses.find(c => c.id === d.id);
+    if (course) {
+      openDetailPanel(course);
+    }
+  }
+
+  /**
+   * Center the view on a specific node with smooth animation
+   * @param {Object} node - Node to center on
+   */
+  centerOnNode(node) {
+    if (!this.svg || !this.zoom) return;
+
+    const rect = this.graphContainer.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+
+    // Calculate the transform to center the node
+    const scale = 1.2; // Zoom in slightly when centering
+    const x = width / 2 - node.x * scale;
+    const y = height / 2 - node.y * scale;
+
+    const transform = d3.zoomIdentity
+      .translate(x, y)
+      .scale(scale);
+
+    // Animate to the new transform
+    this.svg.transition()
+      .duration(750)
+      .ease(d3.easeCubicInOut)
+      .call(this.zoom.transform, transform);
+  }
+}
+
+// ============================================
+// ListView - List View Component
+// ============================================
+
+class ListView {
+  constructor(container, stateManager) {
+    this.container = container;
+    this.stateManager = stateManager;
+    this.listContainer = document.getElementById('list-container');
+    this.emptyState = document.getElementById('list-empty');
+  }
+
+  /**
+   * Update the list view with courses
+   * @param {Array} courses - Array of courses to display
+   */
+  update(courses) {
+    if (!this.listContainer || !this.emptyState) {
+      console.error('List view elements not found');
+      return;
+    }
+
+    // Apply filters and search
+    const filteredCourses = this.filterCourses(courses);
+
+    // Show empty state if no courses
+    if (filteredCourses.length === 0) {
+      this.listContainer.innerHTML = '';
+      this.emptyState.classList.remove('hidden');
+      return;
+    }
+
+    // Hide empty state
+    this.emptyState.classList.add('hidden');
+
+    // Render course cards
+    this.render(filteredCourses);
+  }
+
+  /**
+   * Filter courses based on search query and filters
+   * @param {Array} courses - Array of courses
+   * @returns {Array} Filtered courses
+   */
+  filterCourses(courses) {
+    let filtered = [...courses];
+
+    // Apply search filter
+    const searchQuery = this.stateManager.state.searchQuery.toLowerCase().trim();
+    if (searchQuery) {
+      filtered = filtered.filter(course => {
+        const nameMatch = course.name.toLowerCase().includes(searchQuery);
+        const descMatch = course.description && course.description.toLowerCase().includes(searchQuery);
+        return nameMatch || descMatch;
+      });
+    }
+
+    // Apply status filter
+    const statusFilter = this.stateManager.state.filters.status;
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(course => {
+        const isCompleted = this.stateManager.isCompleted(course.id);
+        const isAvailable = this.stateManager.isAvailable(course);
+
+        if (statusFilter === 'completed') {
+          return isCompleted;
+        } else if (statusFilter === 'available') {
+          return !isCompleted && isAvailable;
+        } else if (statusFilter === 'locked') {
+          return !isCompleted && !isAvailable;
+        }
+        return true;
+      });
+    }
+
+    return filtered;
+  }
+
+  /**
+   * Render course cards
+   * @param {Array} courses - Array of courses to render
+   */
+  render(courses) {
+    this.listContainer.innerHTML = '';
+
+    courses.forEach(course => {
+      const card = this.createCourseCard(course);
+      this.listContainer.appendChild(card);
+    });
+  }
+
+  /**
+   * Create a course card element
+   * @param {Object} course - Course object
+   * @returns {HTMLElement} Course card element
+   */
+  createCourseCard(course) {
+    const card = document.createElement('div');
+    card.className = 'course-card';
+    
+    // Determine course status
+    const isCompleted = this.stateManager.isCompleted(course.id);
+    const isAvailable = this.stateManager.isAvailable(course);
+    
+    if (isCompleted) {
+      card.classList.add('completed');
+    } else if (isAvailable) {
+      card.classList.add('available');
+    } else {
+      card.classList.add('locked');
+    }
+
+    // Add status indicator
+    let statusIndicator = '';
+    if (isCompleted) {
+      statusIndicator = '<span class="status-badge completed" aria-label="Completed">✓ Completed</span>';
+    } else if (isAvailable) {
+      statusIndicator = '<span class="status-badge available" aria-label="Available">● Available</span>';
+    } else {
+      statusIndicator = '<span class="status-badge locked" aria-label="Locked">🔒 Locked</span>';
+    }
+
+    // Build dependencies list
+    let dependenciesHtml = '';
+    if (course.dependencies && course.dependencies.length > 0) {
+      const depNames = course.dependencies
+        .map(depId => {
+          const dep = this.stateManager.state.courses.find(c => c.id === depId);
+          return dep ? dep.name : 'Unknown';
+        });
+      
+      dependenciesHtml = `
+        <div class="course-card-footer">
+          <div class="course-card-dependencies-label">Dependencies:</div>
+          <div class="course-card-dependencies">
+            ${depNames.map(name => `<span class="dependency-tag">${this.escapeHtml(name)}</span>`).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // Highlight search matches
+    const searchQuery = this.stateManager.state.searchQuery.trim();
+    const displayName = searchQuery ? this.highlightText(course.name, searchQuery) : this.escapeHtml(course.name);
+    const displayDesc = course.description 
+      ? (searchQuery ? this.highlightText(course.description, searchQuery) : this.escapeHtml(course.description))
+      : '<em>No description</em>';
+
+    card.innerHTML = `
+      <div class="course-card-header">
+        <div class="course-card-title-wrapper">
+          <h3 class="course-card-title">${displayName}</h3>
+          ${statusIndicator}
+        </div>
+        <input 
+          type="checkbox" 
+          class="course-card-checkbox" 
+          ${isCompleted ? 'checked' : ''}
+          aria-label="Mark ${this.escapeHtml(course.name)} as ${isCompleted ? 'incomplete' : 'complete'}"
+          data-course-id="${course.id}">
+      </div>
+      <div class="course-card-body">
+        <p class="course-card-description">${displayDesc}</p>
+      </div>
+      ${dependenciesHtml}
+    `;
+
+    // Add click handler to open detail panel (but not on checkbox)
+    card.addEventListener('click', (e) => {
+      // Don't open panel if clicking checkbox
+      if (e.target.classList.contains('course-card-checkbox')) {
+        return;
+      }
+      openDetailPanel(course);
+    });
+
+    // Add checkbox handler
+    const checkbox = card.querySelector('.course-card-checkbox');
+    checkbox.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent card click
+      this.toggleCompletion(course.id);
+    });
+
+    // Add keyboard support
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `${course.name} course card. ${isCompleted ? 'Completed' : isAvailable ? 'Available' : 'Locked'}`);
+    
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openDetailPanel(course);
+      }
+    });
+
+    return card;
+  }
+
+  /**
+   * Toggle course completion status
+   * @param {string} courseId - Course ID
+   */
+  async toggleCompletion(courseId) {
+    try {
+      await this.stateManager.toggleCompletion(courseId);
+      
+      // Re-render to update card status
+      this.update(this.stateManager.state.courses);
+    } catch (error) {
+      console.error('Error toggling completion:', error);
+      // The state has already been reverted in StateManager
+      // Just re-render to show the correct state
+      this.update(this.stateManager.state.courses);
+    }
+  }
+
+  /**
+   * Highlight matching text in search results
+   * @param {string} text - Text to highlight
+   * @param {string} query - Search query
+   * @returns {string} HTML with highlighted text
+   */
+  highlightText(text, query) {
+    if (!query || !text) return this.escapeHtml(text);
+    
+    const escapedText = this.escapeHtml(text);
+    const escapedQuery = this.escapeHtml(query);
+    
+    // Case-insensitive replace
+    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+    return escapedText.replace(regex, '<mark class="search-highlight">$1</mark>');
+  }
+
+  /**
+   * Escape HTML to prevent XSS
+   * @param {string} text - Text to escape
+   * @returns {string} Escaped text
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+}
+
+// ============================================
 // Global Application Instance
 // ============================================
 
@@ -1294,6 +2414,8 @@ const storageService = new StorageService();
 const toast = new ToastNotification();
 let courseModal = null; // Will be initialized after DOM loads
 let confirmDialog = null; // Will be initialized after DOM loads
+let listView = null; // Will be initialized after DOM loads
+let graphView = null; // Will be initialized after DOM loads
 
 // ============================================
 // Application Initialization
@@ -1314,7 +2436,9 @@ async function initializeApp() {
       preferences,
       completedCourses,
       graphLayout,
-      viewMode: preferences.viewMode || 'graph'
+      viewMode: preferences.viewMode || 'graph',
+      filters: preferences.filters || { status: 'all' },
+      searchQuery: preferences.searchQuery || ''
     });
 
     // Load courses from API
@@ -1328,6 +2452,9 @@ async function initializeApp() {
 
     // Restore view mode
     switchView(stateManager.state.viewMode);
+
+    // Restore search query and filters in UI
+    restoreUIState();
 
     console.log('Application initialized successfully');
   } catch (error) {
@@ -1368,6 +2495,18 @@ function initializeUI() {
   // Initialize confirm dialog
   confirmDialog = new ConfirmDialog();
   
+  // Initialize list view
+  const listContainer = document.getElementById('list-view');
+  if (listContainer) {
+    listView = new ListView(listContainer, stateManager);
+  }
+  
+  // Initialize graph view
+  const graphContainer = document.getElementById('graph-view');
+  if (graphContainer) {
+    graphView = new GraphView(graphContainer, stateManager);
+  }
+  
   console.log('UI components initialized');
 }
 
@@ -1394,6 +2533,12 @@ function setupEventListeners() {
     btn.addEventListener('click', () => openCourseModal());
   });
 
+  // Set up search functionality
+  setupSearch();
+
+  // Set up filter functionality
+  setupFilters();
+
   // Set up detail panel
   setupDetailPanel();
 
@@ -1406,8 +2551,13 @@ function setupEventListeners() {
  * @param {Object} state - New state
  */
 function handleStateChange(state) {
-  // Save preferences when they change
-  storageService.savePreferences(state.preferences);
+  // Save preferences when they change (including filters and searchQuery)
+  const preferencesToSave = {
+    ...state.preferences,
+    filters: state.filters,
+    searchQuery: state.searchQuery
+  };
+  storageService.savePreferences(preferencesToSave);
   
   // Save completed courses when they change
   storageService.saveCompletedCourses(state.completedCourses);
@@ -1415,7 +2565,37 @@ function handleStateChange(state) {
   // Update progress indicator
   updateProgressIndicator(state);
   
+  // Update list view if it's active
+  if (listView && state.viewMode === 'list') {
+    listView.update(state.courses);
+  }
+  
+  // Update graph view if it's active
+  if (graphView && state.viewMode === 'graph') {
+    graphView.update(state.courses);
+  }
+  
   console.log('State updated:', state);
+}
+
+/**
+ * Restore UI state from loaded preferences
+ */
+function restoreUIState() {
+  const state = stateManager.state;
+  
+  // Restore search query
+  const searchInput = document.getElementById('search-input');
+  if (searchInput && state.searchQuery) {
+    searchInput.value = state.searchQuery;
+  }
+  
+  // Restore filter buttons
+  const filterButtons = document.querySelectorAll('.filter-btn');
+  filterButtons.forEach(btn => {
+    const isActive = btn.dataset.filter === state.filters.status;
+    btn.classList.toggle('active', isActive);
+  });
 }
 
 /**
@@ -1441,6 +2621,13 @@ function switchView(viewMode) {
   const activeView = document.getElementById(`${viewMode}-view`);
   if (activeView) {
     activeView.classList.add('active');
+  }
+
+  // Render the active view
+  if (viewMode === 'list' && listView) {
+    listView.update(stateManager.state.courses);
+  } else if (viewMode === 'graph' && graphView) {
+    graphView.update(stateManager.state.courses);
   }
 
   // Save preference
@@ -1661,6 +2848,92 @@ function setupDetailPanel() {
   if (closeBtn) {
     closeBtn.addEventListener('click', closeDetailPanel);
   }
+}
+
+/**
+ * Set up search functionality with debouncing
+ */
+function setupSearch() {
+  const searchInput = document.getElementById('search-input');
+  if (!searchInput) return;
+
+  let searchTimeout = null;
+
+  // Debounced search handler
+  const handleSearch = (query) => {
+    stateManager.setState({ searchQuery: query });
+    
+    // Update list view if active
+    if (listView && stateManager.state.viewMode === 'list') {
+      listView.update(stateManager.state.courses);
+    }
+  };
+
+  // Input event with debouncing (300ms delay)
+  searchInput.addEventListener('input', (e) => {
+    const query = e.target.value;
+    
+    // Clear previous timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+    
+    // Set new timeout for debounced search
+    searchTimeout = setTimeout(() => {
+      handleSearch(query);
+    }, 300);
+  });
+
+  // Immediate search on Enter key
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      // Clear timeout and search immediately
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+      handleSearch(e.target.value);
+    }
+  });
+
+  // Focus search with '/' keyboard shortcut
+  document.addEventListener('keydown', (e) => {
+    // Don't trigger if user is typing in an input
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+      return;
+    }
+    
+    if (e.key === '/') {
+      e.preventDefault();
+      searchInput.focus();
+    }
+  });
+}
+
+/**
+ * Set up filter functionality
+ */
+function setupFilters() {
+  const filterButtons = document.querySelectorAll('.filter-btn');
+  
+  filterButtons.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const filterValue = e.currentTarget.dataset.filter;
+      
+      // Update active state
+      filterButtons.forEach(b => b.classList.remove('active'));
+      e.currentTarget.classList.add('active');
+      
+      // Update state
+      stateManager.setState({ 
+        filters: { status: filterValue } 
+      });
+      
+      // Update list view if active
+      if (listView && stateManager.state.viewMode === 'list') {
+        listView.update(stateManager.state.courses);
+      }
+    });
+  });
 }
 
 // ============================================

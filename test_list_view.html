@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>List View Test</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div id="app" class="app-container">
+        <header class="app-header">
+            <div class="header-content">
+                <h1 class="app-title">List View Test</h1>
+            </div>
+        </header>
+        
+        <main class="main-content">
+            <aside class="control-panel">
+                <div class="search-container">
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        class="search-input"
+                        placeholder="Search courses...">
+                    <span class="search-icon">🔍</span>
+                </div>
+                
+                <div class="filter-container">
+                    <label class="filter-label">Filter:</label>
+                    <div class="filter-buttons">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn" data-filter="completed">Completed</button>
+                        <button class="filter-btn" data-filter="available">Available</button>
+                        <button class="filter-btn" data-filter="locked">Locked</button>
+                    </div>
+                </div>
+            </aside>
+            
+            <section class="view-container">
+                <div id="list-view" class="view list-view active">
+                    <div id="list-container" class="list-container"></div>
+                    <div id="list-empty" class="empty-state hidden">
+                        <div class="empty-icon">📝</div>
+                        <h2>No Courses Found</h2>
+                        <p>Try adjusting your search or filters.</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <div id="toast-container" class="toast-container"></div>
+    
+    <script src="/static/app.js"></script>
+    <script>
+        // Test the list view with mock data
+        setTimeout(() => {
+            const mockCourses = [
+                {
+                    id: '1',
+                    name: 'Introduction to Python',
+                    description: 'Learn the basics of Python programming',
+                    dependencies: []
+                },
+                {
+                    id: '2',
+                    name: 'Data Structures',
+                    description: 'Learn about arrays, lists, and trees',
+                    dependencies: ['1']
+                },
+                {
+                    id: '3',
+                    name: 'Algorithms',
+                    description: 'Master sorting and searching algorithms',
+                    dependencies: ['2']
+                }
+            ];
+            
+            stateManager.setState({ courses: mockCourses });
+            stateManager.toggleCompletion('1'); // Mark first course as complete
+            
+            if (listView) {
+                listView.update(mockCourses);
+                console.log('List view rendered with mock data');
+            }
+        }, 500);
+    </script>
+</body>
+</html>

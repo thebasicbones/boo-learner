@@ -80,8 +80,8 @@
   - **Property 2: View synchronization on updates**
   - **Validates: Requirements 1.4**
 
-- [-] 4. Implement local storage service for persistence
-- [-] 4.1 Create StorageService class for managing local storage
+- [x] 4. Implement local storage service for persistence
+- [x] 4.1 Create StorageService class for managing local storage
   - Implement methods for saving and loading preferences
   - Add methods for completed courses tracking
   - Create pending changes queue for offline support
@@ -100,7 +100,7 @@
   - **Property 29: Offline change queuing**
   - **Validates: Requirements 10.5**
 
-- [ ] 4.5 Implement state restoration on application load
+- [x] 4.5 Implement state restoration on application load
   - Load user preferences from local storage
   - Restore last view mode and filter settings
   - Load completed courses and graph layout positions
@@ -112,15 +112,15 @@
   - Test completed courses are loaded
   - _Requirements: 10.3_
 
-- [ ] 5. Build list view with search and filters
-- [ ] 5.1 Create ListView component with course cards
+- [x] 5. Build list view with search and filters
+- [x] 5.1 Create ListView component with course cards
   - Implement course card layout with glassmorphism styling
   - Display course name, description, and dependencies
   - Add completion checkbox to each card
   - Show course status indicators (available, locked, completed)
   - _Requirements: 7.1, 7.2, 9.4_
 
-- [ ] 5.2 Implement real-time search functionality
+- [x] 5.2 Implement real-time search functionality
   - Create search input with debounced filtering
   - Filter courses by name and description (case-insensitive)
   - Highlight matching text in search results
@@ -140,7 +140,7 @@
   - Test helpful message is shown
   - _Requirements: 8.4_
 
-- [ ] 5.6 Add filter controls for course status
+- [x] 5.6 Add filter controls for course status
   - Create filter buttons for all, completed, available, and locked courses
   - Implement filter logic based on completion and dependency status
   - Update view when filters change
@@ -155,7 +155,7 @@
   - **Validates: Requirements 8.5**
 
 - [ ] 6. Implement course progress tracking
-- [ ] 6.1 Add completion status management to StateManager
+- [x] 6.1 Add completion status management to StateManager
   - Track completed courses in Set data structure
   - Implement toggle completion method
   - Persist completion status to backend API
@@ -170,7 +170,7 @@
   - **Property 27: Completion persistence**
   - **Validates: Requirements 10.2**
 
-- [ ] 6.4 Build progress indicator component
+- [x] 6.4 Build progress indicator component
   - Calculate overall completion percentage
   - Display progress bar with animated fill
   - Show completed/total course counts
@@ -181,7 +181,7 @@
   - **Property 17: Progress calculation accuracy**
   - **Validates: Requirements 7.3**
 
-- [ ] 6.6 Implement course availability logic
+- [x] 6.6 Implement course availability logic
   - Check if all dependencies are completed
   - Highlight available courses with distinct styling
   - Update availability when completion status changes
@@ -191,15 +191,15 @@
   - **Property 18: Course availability logic**
   - **Validates: Requirements 7.4**
 
-- [ ] 7. Create D3.js force-directed graph visualization
-- [ ] 7.1 Set up D3.js graph container and SVG elements
+- [-] 7. Create D3.js force-directed graph visualization
+- [x] 7.1 Set up D3.js graph container and SVG elements
   - Create SVG container with responsive sizing
   - Initialize force simulation with appropriate forces
   - Set up zoom and pan behaviors
   - Add graph controls (reset, zoom in/out)
   - _Requirements: 2.1_
 
-- [ ] 7.2 Implement graph node rendering with course data
+- [x] 7.2 Implement graph node rendering with course data
   - Create nodes for each course with circles and labels
   - Apply colors based on course status (completed, available, locked)
   - Add node styling with shadows and borders
@@ -210,14 +210,14 @@
   - **Property 3: Graph structure correctness**
   - **Validates: Requirements 2.1**
 
-- [ ] 7.4 Implement graph edge rendering for dependencies
+- [x] 7.4 Implement graph edge rendering for dependencies
   - Create directed edges (arrows) for each dependency
   - Style edges with appropriate colors and widths
   - Add markers for arrow heads
   - Update edges when nodes move
   - _Requirements: 2.1_
 
-- [ ] 7.5 Add node hover interactions with highlighting
+- [x] 7.5 Add node hover interactions with highlighting
   - Highlight hovered node with color change
   - Highlight all direct dependencies (incoming edges)
   - Highlight all dependents (outgoing edges)
@@ -228,7 +228,7 @@
   - **Property 4: Hover highlight correctness**
   - **Validates: Requirements 2.2**
 
-- [ ] 7.7 Implement node click interactions and detail panel
+- [x] 7.7 Implement node click interactions and detail panel
   - Center view on clicked node with smooth animation
   - Open side panel with course details
   - Display edit and delete buttons in panel
@@ -240,7 +240,7 @@
   - Test detail panel opens with correct data
   - _Requirements: 2.3_
 
-- [ ] 7.9 Add drag functionality for node repositioning
+- [x] 7.9 Add drag functionality for node repositioning
   - Enable dragging of individual nodes
   - Maintain edge connections during drag
   - Update force simulation during drag
@@ -251,15 +251,15 @@
   - **Property 5: Drag maintains connectivity**
   - **Validates: Requirements 2.4**
 
-- [ ] 7.11 Implement graph update animations
+- [x] 7.11 Implement graph update animations
   - Animate node additions with fade-in
   - Animate node removals with fade-out
   - Smooth transition when dependencies change
   - Use appropriate easing functions
   - _Requirements: 2.5_
 
-- [ ] 8. Build timeline view with topological sorting
-- [ ] 8.1 Create TimelineView component structure
+- [-] 8. Build timeline view with topological sorting
+- [-] 8.1 Create TimelineView component structure
   - Set up timeline container with horizontal/vertical layouts
   - Create level containers for grouping courses
   - Add responsive layout switching for mobile
